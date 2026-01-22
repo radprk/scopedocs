@@ -1,15 +1,18 @@
-from openai import AsyncOpenAI
 import os
 from typing import List, Dict, Any
 from models import EmbeddedArtifact, ArtifactType, ChatRequest, ChatResponse
 from database import db, COLLECTIONS
 import numpy as np
+import litellm
+from emergentintegrations.llm.chat import get_integration_proxy_url
 
 class RAGService:
     """Service for RAG-powered Ask Scopey chatbot"""
     
     def __init__(self):
-        self.client = AsyncOpenAI(api_key=os.getenv('EMERGENT_LLM_KEY'))
+        self.api_key = os.getenv('EMERGENT_LLM_KEY')
+        # Set up litellm for Emergent proxy
+        litellm.api_base = get_integration_proxy_url()
         self.embedding_model = 'text-embedding-3-large'
         self.chat_model = 'gpt-4o'
     
