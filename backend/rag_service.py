@@ -18,11 +18,12 @@ class RAGService:
     
     async def embed_text(self, text: str) -> List[float]:
         """Generate embeddings for text"""
-        response = await self.client.embeddings.create(
+        response = await litellm.aembedding(
             model=self.embedding_model,
-            input=text
+            input=text,
+            api_key=self.api_key
         )
-        return response.data[0].embedding
+        return response.data[0]['embedding']
     
     async def embed_artifact(self, artifact_id: str, artifact_type: ArtifactType, content: str, metadata: Dict = None) -> EmbeddedArtifact:
         """Embed an artifact and store it"""
