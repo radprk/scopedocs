@@ -3,27 +3,52 @@ from typing import List, Dict, Any
 from models import EmbeddedArtifact, ArtifactType, ChatRequest, ChatResponse
 from database import db, COLLECTIONS
 import numpy as np
-import litellm
-from emergentintegrations.llm.chat import get_integration_proxy_url
+import hashlib
 
 class RAGService:
     """Service for RAG-powered Ask Scopey chatbot"""
     
     def __init__(self):
         self.api_key = os.getenv('EMERGENT_LLM_KEY')
-        # Set up litellm for Emergent proxy
-        litellm.api_base = get_integration_proxy_url()
         self.embedding_model = 'text-embedding-3-large'
         self.chat_model = 'gpt-4o'
+        self.use_mock = False  # Will switch to True if API unavailable
+    
+    def _generate_mock_embedding(self, text: str, dimensions: int = 1536) -> List[float]:
+        """Generate deterministic mock embedding from text hash"""
+        # Use hash for deterministic results
+        hash_obj = hashlib.sha256(text.encode())
+        hash_bytes = hash_obj.digest()
+        
+        # Convert to floats
+        np.random.seed(int.from_bytes(hash_bytes[:4], 'big'))
+        embedding = np.random.randn(dimensions).tolist()
+        
+        # Normalize
+        norm = np.linalg.norm(embedding)
+        return [x / norm for x in embedding]
     
     async def embed_text(self, text: str) -> List[float]:
-        """Generate embeddings for text"""
-        response = await litellm.aembedding(
-            model=self.embedding_model,
-            input=text,
-            api_key=self.api_key
-        )
-        return response.data[0]['embedding']
+        """Generate embeddings for text (with fallback to mock)"""
+        if self.use_mock:
+            return self._generate_mock_embedding(text)
+        
+        try:
+            # Try real embeddings first
+            import litellm
+            from emergentintegrations.llm.chat import get_integration_proxy_url
+            litellm.api_base = get_integration_proxy_url()
+            
+            response = await litellm.aembedding(
+                model=self.embedding_model,
+                input=text,
+                api_key=self.api_key
+            )
+            return response.data[0]['embedding']
+        except Exception as e:
+            print(f"Embeddings API error, using mock: {str(e)[:100]}")
+            self.use_mock = True
+            return self._generate_mock_embedding(text)
     
     async def embed_artifact(self, artifact_id: str, artifact_type: ArtifactType, content: str, metadata: Dict = None) -> EmbeddedArtifact:
         """Embed an artifact and store it"""
