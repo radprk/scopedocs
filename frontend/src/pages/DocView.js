@@ -33,6 +33,7 @@ const DocView = () => {
 
   useEffect(() => {
     fetchDoc();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docId]);
 
   const getFreshnessColor = (level) => {
