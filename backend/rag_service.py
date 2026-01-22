@@ -169,12 +169,13 @@ class RAGService:
             'content': f"{context}\n\nQuestion: {request.question}"
         })
         
-        # Get response from GPT-4
-        response = await self.client.chat.completions.create(
+        # Get response from GPT-4 via litellm
+        response = await litellm.acompletion(
             model=self.chat_model,
             messages=messages,
             temperature=0.7,
-            max_tokens=1000
+            max_tokens=1000,
+            api_key=self.api_key
         )
         
         answer = response.choices[0].message.content
