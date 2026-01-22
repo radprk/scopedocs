@@ -174,36 +174,55 @@ class RAGService:
                 'similarity': round(doc['similarity'], 3)
             })
         
-        # Build messages
-        messages = [
-            {
-                'role': 'system',
-                'content': '''You are Scopey, an AI assistant for ScopeDocs. You help teams understand their 
-                projects by answering questions based on their Slack conversations, GitHub PRs, Linear issues, 
-                and documentation. Always cite your sources using [1], [2], etc. Be concise and helpful.'''
-            }
-        ]
-        
-        # Add history
-        for msg in request.history:
-            messages.append({'role': msg.role, 'content': msg.content})
-        
-        # Add current question with context
-        messages.append({
-            'role': 'user',
-            'content': f"{context}\n\nQuestion: {request.question}"
-        })
-        
-        # Get response from GPT-4 via litellm
-        response = await litellm.acompletion(
-            model=self.chat_model,
-            messages=messages,
-            temperature=0.7,
-            max_tokens=1000,
-            api_key=self.api_key
-        )
-        
-        answer = response.choices[0].message.content
+        # Try to use real LLM, fallback to simple response
+        try:
+            if not self.use_mock:
+                import litellm
+                from emergentintegrations.llm.chat import get_integration_proxy_url
+                litellm.api_base = get_integration_proxy_url()
+                
+                messages = [
+                    {
+                        'role': 'system',
+                        'content': '''You are Scopey, an AI assistant for ScopeDocs. You help teams understand their 
+                        projects by answering questions based on their Slack conversations, GitHub PRs, Linear issues, 
+                        and documentation. Always cite your sources using [1], [2], etc. Be concise and helpful.'''
+                    }
+                ]
+                
+                for msg in request.history:
+                    messages.append({'role': msg.role, 'content': msg.content})
+                
+                messages.append({
+                    'role': 'user',
+                    'content': f"{context}\n\nQuestion: {request.question}"
+                })
+                
+                response = await litellm.acompletion(
+                    model=self.chat_model,
+                    messages=messages,
+                    temperature=0.7,
+                    max_tokens=1000,
+                    api_key=self.api_key
+                )
+                
+                answer = response.choices[0].message.content
+            else:
+                raise Exception("Using mock mode")
+                
+        except Exception as e:
+            print(f"Chat API error, using mock response: {str(e)[:100]}")
+            self.use_mock = True
+            # Generate simple response from context
+            answer = f"Based on the available documents, here's what I found:\\n\\n"
+            if relevant_docs:
+                for i, doc in enumerate(relevant_docs[:3], 1):
+                    artifact_type = doc['artifact_type'].replace('_', ' ').title()
+                    snippet = doc['content'][:200]
+                    answer += f"[{i}] {artifact_type}: {snippet}...\\n\\n"
+                answer += f"I found {len(relevant_docs)} relevant artifacts related to your question about: {request.question}"
+            else:
+                answer = "I couldn't find any relevant information in the knowledge base. Please try rephrasing your question or generate more mock data first."
         
         return ChatResponse(
             answer=answer,
