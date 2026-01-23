@@ -17,6 +17,16 @@ from backend.models import (
     IngestionJobPayload, IngestionJob, IngestionJobType, IngestionJobStatus, IngestionSource
 )
 from database import db, COLLECTIONS, init_db, close_db
+from postgres import (
+    postgres_enabled,
+    ensure_postgres_schema,
+    postgres_connection,
+    upsert_work_item,
+    upsert_pull_request,
+    upsert_conversation,
+    insert_relationship,
+    insert_artifact_event,
+)
 from mock_data_generator import MockDataGenerator
 from doc_service import DocGenerationService, FreshnessDetectionService
 from rag_service import RAGService
@@ -41,6 +51,39 @@ rag_service = RAGService()
 ownership_service = OwnershipService()
 mock_generator = MockDataGenerator()
 scheduler = AsyncIOScheduler(timezone="UTC")
+
+issue_ref_pattern = re.compile(r"\b([A-Z]{2,}-\d+)\b")
+
+
+def extract_issue_refs(text: str) -> List[str]:
+    return list({match.group(1) for match in issue_ref_pattern.finditer(text or "")})
+
+
+def _sync_postgres_work_item(work_item: Dict[str, Any], artifact_event: Dict[str, Any]) -> None:
+    ensure_postgres_schema()
+    with postgres_connection() as conn:
+        upsert_work_item(conn, work_item)
+        insert_artifact_event(conn, artifact_event)
+
+
+def _sync_postgres_pull_request(
+    pull_request: Dict[str, Any],
+    relationships: List[Relationship],
+    artifact_event: Dict[str, Any],
+) -> None:
+    ensure_postgres_schema()
+    with postgres_connection() as conn:
+        upsert_pull_request(conn, pull_request)
+        for relationship in relationships:
+            insert_relationship(conn, relationship.model_dump())
+        insert_artifact_event(conn, artifact_event)
+
+
+def _sync_postgres_conversation(conversation: Dict[str, Any], artifact_event: Dict[str, Any]) -> None:
+    ensure_postgres_schema()
+    with postgres_connection() as conn:
+        upsert_conversation(conn, conversation)
+        insert_artifact_event(conn, artifact_event)
 
 # ===================
 # MOCK DATA ENDPOINTS
@@ -445,6 +488,16 @@ async def get_people():
     """Get all people"""
     people = await db[COLLECTIONS['people']].find({}, {"_id": 0}).to_list(1000)
     return people
+
+# ===================
+# RELATIONSHIPS
+# ===================
+
+@api_router.get("/relationships", response_model=List[Relationship])
+async def get_relationships():
+    """Get all relationships"""
+    relationships = await db[COLLECTIONS['relationships']].find({}, {"_id": 0}).to_list(1000)
+    return relationships
 
 # ===================
 # PROJECTS
