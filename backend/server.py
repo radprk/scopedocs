@@ -11,13 +11,14 @@ from backend.models import (
     WorkItem, PullRequest, Conversation, ScopeDoc, Component,
     Person, Relationship, ChatRequest, ChatResponse, DocDriftAlert
 )
-from backend.database import db, COLLECTIONS, init_db, close_db
-from backend.ingest.pipeline import ingest_records
-from backend.mock_data_generator import MockDataGenerator
-from backend.doc_service import DocGenerationService, FreshnessDetectionService
-from backend.rag_service import RAGService
-from backend.ownership_service import OwnershipService
-from backend.storage.postgres import init_pg, close_pool
+from database import db, COLLECTIONS, init_db, close_db
+from mock_data_generator import MockDataGenerator
+from doc_service import DocGenerationService, FreshnessDetectionService
+from rag_service import RAGService
+from ownership_service import OwnershipService
+from integrations.slack.routes import router as slack_router
+from integrations.github.routes import router as github_router
+from integrations.linear.routes import router as linear_router
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -348,6 +349,9 @@ async def get_stats():
 
 # Include the router in the main app
 app.include_router(api_router)
+app.include_router(slack_router)
+app.include_router(github_router)
+app.include_router(linear_router)
 
 app.add_middleware(
     CORSMiddleware,
