@@ -1,7 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 from pathlib import Path
@@ -10,13 +9,26 @@ from typing import List, Dict, Any
 # Import models and services
 from models import (
     WorkItem, PullRequest, Conversation, ScopeDoc, Component,
-    Person, Relationship, ChatRequest, ChatResponse, DocDriftAlert
+    Person, Relationship, ChatRequest, ChatResponse, DocDriftAlert,
+    ArtifactEvent, ArtifactType, RelationshipType
 )
 from database import db, COLLECTIONS, init_db, close_db
+from postgres import (
+    postgres_enabled,
+    ensure_postgres_schema,
+    postgres_connection,
+    upsert_work_item,
+    upsert_pull_request,
+    upsert_conversation,
+    insert_relationship,
+    insert_artifact_event,
+)
 from mock_data_generator import MockDataGenerator
 from doc_service import DocGenerationService, FreshnessDetectionService
 from rag_service import RAGService
 from ownership_service import OwnershipService
+import anyio
+import re
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -33,6 +45,39 @@ freshness_service = FreshnessDetectionService()
 rag_service = RAGService()
 ownership_service = OwnershipService()
 mock_generator = MockDataGenerator()
+
+issue_ref_pattern = re.compile(r"\b([A-Z]{2,}-\d+)\b")
+
+
+def extract_issue_refs(text: str) -> List[str]:
+    return list({match.group(1) for match in issue_ref_pattern.finditer(text or "")})
+
+
+def _sync_postgres_work_item(work_item: Dict[str, Any], artifact_event: Dict[str, Any]) -> None:
+    ensure_postgres_schema()
+    with postgres_connection() as conn:
+        upsert_work_item(conn, work_item)
+        insert_artifact_event(conn, artifact_event)
+
+
+def _sync_postgres_pull_request(
+    pull_request: Dict[str, Any],
+    relationships: List[Relationship],
+    artifact_event: Dict[str, Any],
+) -> None:
+    ensure_postgres_schema()
+    with postgres_connection() as conn:
+        upsert_pull_request(conn, pull_request)
+        for relationship in relationships:
+            insert_relationship(conn, relationship.model_dump())
+        insert_artifact_event(conn, artifact_event)
+
+
+def _sync_postgres_conversation(conversation: Dict[str, Any], artifact_event: Dict[str, Any]) -> None:
+    ensure_postgres_schema()
+    with postgres_connection() as conn:
+        upsert_conversation(conn, conversation)
+        insert_artifact_event(conn, artifact_event)
 
 # ===================
 # MOCK DATA ENDPOINTS
@@ -115,6 +160,149 @@ async def generate_multiple_scenarios(count: int = 5):
         'message': f'Generated {count} mock scenarios',
         'scenarios': generated
     }
+
+# ===================
+# WEBHOOKS (INTEGRATIONS)
+# ===================
+
+@api_router.post("/webhooks/slack")
+async def slack_webhook(payload: Dict[str, Any]):
+    """Receive Slack events and persist them for integration testing."""
+    if payload.get("type") == "url_verification":
+        return {"challenge": payload.get("challenge")}
+
+    event = payload.get("event", {})
+    if not event:
+        raise HTTPException(status_code=400, detail="Missing Slack event payload")
+
+    thread_ts = event.get("thread_ts") or event.get("event_ts") or ""
+    conversation = Conversation(
+        external_id=thread_ts or event.get("event_ts", ""),
+        channel=event.get("channel", "unknown"),
+        thread_ts=thread_ts or event.get("event_ts", ""),
+        messages=[event],
+        participants=[event.get("user")] if event.get("user") else [],
+        work_item_refs=extract_issue_refs(event.get("text", "")),
+    )
+    await db[COLLECTIONS['conversations']].insert_one(conversation.model_dump())
+
+    artifact_event = ArtifactEvent(
+        artifact_type=ArtifactType.SLACK_MESSAGE,
+        artifact_id=conversation.id,
+        data=payload,
+        source="slack",
+        metadata={"channel": conversation.channel, "event_id": payload.get("event_id")},
+    )
+    await db[COLLECTIONS['artifact_events']].insert_one(artifact_event.model_dump())
+
+    if postgres_enabled():
+        await anyio.to_thread.run_sync(
+            _sync_postgres_conversation,
+            conversation.model_dump(),
+            artifact_event.model_dump(),
+        )
+
+    return {"status": "ok", "conversation_id": conversation.id}
+
+
+@api_router.post("/webhooks/github")
+async def github_webhook(payload: Dict[str, Any]):
+    """Receive GitHub events and persist them for integration testing."""
+    pr_payload = payload.get("pull_request")
+    if not pr_payload:
+        raise HTTPException(status_code=400, detail="Missing pull_request payload")
+
+    status = "open"
+    if payload.get("action") == "closed":
+        status = "merged" if pr_payload.get("merged") else "closed"
+
+    pr = PullRequest(
+        external_id=str(pr_payload.get("number")),
+        title=pr_payload.get("title", ""),
+        description=pr_payload.get("body", ""),
+        author=(pr_payload.get("user") or {}).get("login", "unknown"),
+        status=status,
+        repo=(payload.get("repository") or {}).get("full_name", "unknown"),
+        files_changed=[],
+        work_item_refs=extract_issue_refs(f"{pr_payload.get('title', '')}\n{pr_payload.get('body', '')}"),
+        merged_at=pr_payload.get("merged_at"),
+    )
+    await db[COLLECTIONS['pull_requests']].insert_one(pr.model_dump())
+
+    artifact_event = ArtifactEvent(
+        artifact_type=ArtifactType.GITHUB_PR,
+        artifact_id=pr.id,
+        data=payload,
+        source="github",
+        metadata={"action": payload.get("action"), "delivery_id": payload.get("delivery_id")},
+    )
+    await db[COLLECTIONS['artifact_events']].insert_one(artifact_event.model_dump())
+
+    relationships = []
+    if pr.work_item_refs:
+        work_items = await db[COLLECTIONS['work_items']].find(
+            {"external_id": {"$in": pr.work_item_refs}},
+            {"_id": 0},
+        ).to_list(100)
+        for item in work_items:
+            rel = Relationship(
+                source_id=item["id"],
+                source_type="work_item",
+                target_id=pr.id,
+                target_type="pull_request",
+                relationship_type=RelationshipType.IMPLEMENTS,
+                evidence=[pr.external_id],
+            )
+            relationships.append(rel)
+            await db[COLLECTIONS['relationships']].insert_one(rel.model_dump())
+
+    if postgres_enabled():
+        await anyio.to_thread.run_sync(
+            _sync_postgres_pull_request,
+            pr.model_dump(),
+            relationships,
+            artifact_event.model_dump(),
+        )
+
+    return {"status": "ok", "pull_request_id": pr.id, "relationships": len(relationships)}
+
+
+@api_router.post("/webhooks/linear")
+async def linear_webhook(payload: Dict[str, Any]):
+    """Receive Linear events and persist them for integration testing."""
+    issue_payload = payload.get("data") or payload.get("issue") or {}
+    if not issue_payload:
+        raise HTTPException(status_code=400, detail="Missing Linear issue payload")
+
+    work_item = WorkItem(
+        external_id=issue_payload.get("identifier") or issue_payload.get("id") or "unknown",
+        title=issue_payload.get("title", ""),
+        description=issue_payload.get("description") or "",
+        status=(issue_payload.get("state") or {}).get("name", issue_payload.get("state", "unknown")),
+        team=(issue_payload.get("team") or {}).get("name"),
+        assignee=(issue_payload.get("assignee") or {}).get("name"),
+        project_id=(issue_payload.get("project") or {}).get("id"),
+        labels=[label.get("name") for label in issue_payload.get("labels", []) if isinstance(label, dict)],
+    )
+    await db[COLLECTIONS['work_items']].insert_one(work_item.model_dump())
+
+    artifact_event = ArtifactEvent(
+        artifact_type=ArtifactType.LINEAR_ISSUE,
+        artifact_id=work_item.id,
+        data=payload,
+        source="linear",
+        metadata={"event_type": payload.get("type")},
+    )
+    await db[COLLECTIONS['artifact_events']].insert_one(artifact_event.model_dump())
+
+    if postgres_enabled():
+        await anyio.to_thread.run_sync(
+            _sync_postgres_work_item,
+            work_item.model_dump(),
+            artifact_event.model_dump(),
+        )
+
+    return {"status": "ok", "work_item_id": work_item.id}
 
 # ===================
 # WORK ITEMS
@@ -318,6 +506,16 @@ async def get_people():
     return people
 
 # ===================
+# RELATIONSHIPS
+# ===================
+
+@api_router.get("/relationships", response_model=List[Relationship])
+async def get_relationships():
+    """Get all relationships"""
+    relationships = await db[COLLECTIONS['relationships']].find({}, {"_id": 0}).to_list(1000)
+    return relationships
+
+# ===================
 # PROJECTS
 # ===================
 
@@ -388,6 +586,8 @@ logger = logging.getLogger(__name__)
 @app.on_event("startup")
 async def startup_db():
     await init_db()
+    if postgres_enabled():
+        await anyio.to_thread.run_sync(ensure_postgres_schema)
     logger.info("Database initialized")
 
 @app.on_event("shutdown")

@@ -291,6 +291,9 @@ curl http://localhost:8001/api/ownership
 5. Go to Ask Scopey → Generate Embeddings → Ask questions
 6. Check Ownership page for component ownership
 
+### **Integrations Testing**
+See `docs/integrations-testing.md` for end-to-end webhook testing, tunnel setup, and Postgres readbacks.
+
 ---
 
 ## 🔮 Future Enhancements

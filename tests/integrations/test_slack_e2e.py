@@ -1,0 +1,43 @@
+import os
+
+import pytest
+import requests
+
+from tests.integrations.conftest import integration_enabled, wait_for_condition
+from tests.integrations.postgres_utils import fetch_table_counts, postgres_enabled
+
+pytestmark = pytest.mark.skipif(
+    not integration_enabled(), reason="Set RUN_INTEGRATION_TESTS=1 to run integration tests."
+)
+
+
+def test_slack_message_ingest(base_url, stats_fetcher):
+    before_stats = stats_fetcher()
+
+    payload = {
+        "type": "event_callback",
+        "event_id": "Ev123",
+        "event": {
+            "type": "message",
+            "channel": "C123",
+            "user": "U123",
+            "text": "Hello from integration test LIN-123",
+            "event_ts": "1710000000.000200",
+        },
+    }
+
+    response = requests.post(f"{base_url}/api/webhooks/slack", json=payload, timeout=10)
+    response.raise_for_status()
+
+    def _stats_updated() -> bool:
+        after_stats = stats_fetcher()
+        return after_stats["conversations"] >= before_stats["conversations"] + 1
+
+    wait_for_condition(_stats_updated)
+
+    if postgres_enabled():
+        counts = fetch_table_counts()
+        assert counts.get("conversations", 0) >= 1
+        assert counts.get("artifact_events", 0) >= 1
+
+    assert response.json().get("status") == "ok"
