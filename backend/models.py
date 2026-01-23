@@ -139,6 +139,24 @@ class EmbeddedArtifact(BaseModel):
     metadata: Dict[str, Any] = {}
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
+class IntegrationToken(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    integration: str
+    workspace_id: str
+    access_token: str
+    refresh_token: Optional[str] = None
+    expires_at: Optional[datetime] = None
+    metadata: Dict[str, Any] = {}
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class ExternalIDMapping(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    integration: str
+    external_id: str
+    internal_id: str
+    artifact_type: ArtifactType
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
 # API Request/Response Models
 class ChatMessage(BaseModel):
     role: str
