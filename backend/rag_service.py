@@ -1,7 +1,7 @@
 import os
 from typing import List, Dict, Any
-from models import EmbeddedArtifact, ArtifactType, ChatRequest, ChatResponse
-from database import db, COLLECTIONS
+from backend.models import EmbeddedArtifact, ArtifactType, ChatRequest, ChatResponse
+from backend.database import db, COLLECTIONS
 import numpy as np
 import hashlib
 

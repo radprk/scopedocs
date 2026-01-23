@@ -1,7 +1,7 @@
 import random
 from datetime import datetime, timedelta
 from typing import List
-from models import (
+from backend.models import (
     ArtifactEvent, ArtifactType, WorkItem, PullRequest, Conversation,
     Component, Person, Relationship, RelationshipType
 )

@@ -1,6 +1,6 @@
 from typing import List, Dict, Any
-from models import Component, Person, Relationship, RelationshipType
-from database import db, COLLECTIONS
+from backend.models import Component, Person, Relationship, RelationshipType
+from backend.database import db, COLLECTIONS
 
 class OwnershipService:
     """Service for tracking ownership across systems"""
