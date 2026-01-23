@@ -154,24 +154,23 @@ class EmbeddedArtifact(BaseModel):
     metadata: Dict[str, Any] = {}
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
-class IngestionJobPayload(BaseModel):
-    source: IngestionSource
-    since: datetime
-    project_id: Optional[str] = None
-
-class IngestionJob(BaseModel):
+class IntegrationToken(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    job_key: str
-    job_type: IngestionJobType
-    payload: IngestionJobPayload
-    status: IngestionJobStatus = IngestionJobStatus.QUEUED
-    attempts: int = 0
-    last_error: Optional[str] = None
-    last_run_at: Optional[datetime] = None
-    last_success_at: Optional[datetime] = None
-    checkpoint: Optional[datetime] = None
+    integration: str
+    workspace_id: str
+    access_token: str
+    refresh_token: Optional[str] = None
+    expires_at: Optional[datetime] = None
+    metadata: Dict[str, Any] = {}
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+class ExternalIDMapping(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    integration: str
+    external_id: str
+    internal_id: str
+    artifact_type: ArtifactType
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
 # API Request/Response Models
 class ChatMessage(BaseModel):
