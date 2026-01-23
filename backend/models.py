@@ -31,6 +31,21 @@ class FreshnessLevel(str, Enum):
     STALE = "stale"
     OUTDATED = "outdated"
 
+class IngestionSource(str, Enum):
+    GITHUB = "github"
+    SLACK = "slack"
+    LINEAR = "linear"
+
+class IngestionJobType(str, Enum):
+    REFRESH = "refresh"
+    BACKFILL = "backfill"
+
+class IngestionJobStatus(str, Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
+
 # Base Models
 class ArtifactEvent(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
