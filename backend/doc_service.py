@@ -1,7 +1,7 @@
-from models import ScopeDoc, WorkItem, PullRequest, Conversation, FreshnessLevel, DocDriftAlert
+from backend.models import ScopeDoc, WorkItem, PullRequest, Conversation, FreshnessLevel, DocDriftAlert
 from typing import List, Dict, Any
 from datetime import datetime, timedelta
-from database import db, COLLECTIONS
+from backend.database import db, COLLECTIONS
 
 class DocGenerationService:
     """Service for generating living documentation"""
