@@ -11,7 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 # Import models and services
-from models import (
+from backend.models import (
     WorkItem, PullRequest, Conversation, ScopeDoc, Component,
     Person, Relationship, ChatRequest, ChatResponse, DocDriftAlert,
     IngestionJobPayload, IngestionJob, IngestionJobType, IngestionJobStatus, IngestionSource
@@ -51,31 +51,18 @@ async def generate_mock_scenario():
     """Generate a full mock scenario with all artifacts"""
     scenario = mock_generator.generate_full_scenario()
     
-    # Save to database
-    # Save people
-    for person in scenario['people']:
-        existing = await db[COLLECTIONS['people']].find_one({'external_id': person.external_id})
-        if not existing:
-            await db[COLLECTIONS['people']].insert_one(person.model_dump())
-    
-    # Save components
-    for component in scenario['components']:
-        existing = await db[COLLECTIONS['components']].find_one({'name': component.name})
-        if not existing:
-            await db[COLLECTIONS['components']].insert_one(component.model_dump())
-    
-    # Save work item
-    await db[COLLECTIONS['work_items']].insert_one(scenario['work_item'].model_dump())
-    
-    # Save PR
-    await db[COLLECTIONS['pull_requests']].insert_one(scenario['pr'].model_dump())
-    
-    # Save conversation
-    await db[COLLECTIONS['conversations']].insert_one(scenario['conversation'].model_dump())
-    
-    # Save relationships
-    for rel in scenario['relationships']:
-        await db[COLLECTIONS['relationships']].insert_one(rel.model_dump())
+    await ingest_records(
+        {
+            COLLECTIONS['people']: scenario['people'],
+            COLLECTIONS['components']: scenario['components'],
+            COLLECTIONS['work_items']: [scenario['work_item']],
+            COLLECTIONS['pull_requests']: [scenario['pr']],
+            COLLECTIONS['conversations']: [scenario['conversation']],
+            COLLECTIONS['relationships']: scenario['relationships'],
+        },
+        write_postgres=True,
+        write_mongo=True,
+    )
     
     return {
         'message': 'Mock scenario generated successfully',
@@ -93,26 +80,17 @@ async def generate_multiple_scenarios(count: int = 5):
     for i in range(count):
         scenario = mock_generator.generate_full_scenario()
         
-        # Save people (only once)
+        records = {
+            COLLECTIONS['work_items']: [scenario['work_item']],
+            COLLECTIONS['pull_requests']: [scenario['pr']],
+            COLLECTIONS['conversations']: [scenario['conversation']],
+            COLLECTIONS['relationships']: scenario['relationships'],
+        }
         if i == 0:
-            for person in scenario['people']:
-                existing = await db[COLLECTIONS['people']].find_one({'external_id': person.external_id})
-                if not existing:
-                    await db[COLLECTIONS['people']].insert_one(person.model_dump())
-            
-            # Save components (only once)
-            for component in scenario['components']:
-                existing = await db[COLLECTIONS['components']].find_one({'name': component.name})
-                if not existing:
-                    await db[COLLECTIONS['components']].insert_one(component.model_dump())
-        
-        # Save artifacts
-        await db[COLLECTIONS['work_items']].insert_one(scenario['work_item'].model_dump())
-        await db[COLLECTIONS['pull_requests']].insert_one(scenario['pr'].model_dump())
-        await db[COLLECTIONS['conversations']].insert_one(scenario['conversation'].model_dump())
-        
-        for rel in scenario['relationships']:
-            await db[COLLECTIONS['relationships']].insert_one(rel.model_dump())
+            records[COLLECTIONS['people']] = scenario['people']
+            records[COLLECTIONS['components']] = scenario['components']
+
+        await ingest_records(records, write_postgres=True, write_mongo=True)
         
         generated.append({
             'project': scenario['project']['name'],
@@ -482,7 +460,7 @@ async def get_projects():
         project_id = item.get('project_id')
         if project_id and project_id not in projects_map:
             # Get project info from mock data
-            from mock_data_generator import PROJECTS
+            from backend.mock_data_generator import PROJECTS
             project_info = next((p for p in PROJECTS if p['id'] == project_id), None)
             if project_info:
                 projects_map[project_id] = {
@@ -542,13 +520,12 @@ logger = logging.getLogger(__name__)
 @app.on_event("startup")
 async def startup_db():
     await init_db()
-    scheduler.add_job(run_scheduled_refreshes, CronTrigger(hour=0, minute=0))
-    scheduler.start()
-    await run_scheduled_refreshes()
+    await init_pg()
     logger.info("Database initialized")
 
 @app.on_event("shutdown")
 async def shutdown_db():
     scheduler.shutdown()
     await close_db()
+    await close_pool()
     logger.info("Database connection closed")
