@@ -31,6 +31,21 @@ class FreshnessLevel(str, Enum):
     STALE = "stale"
     OUTDATED = "outdated"
 
+class IngestionSource(str, Enum):
+    GITHUB = "github"
+    SLACK = "slack"
+    LINEAR = "linear"
+
+class IngestionJobType(str, Enum):
+    REFRESH = "refresh"
+    BACKFILL = "backfill"
+
+class IngestionJobStatus(str, Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
+
 # Base Models
 class ArtifactEvent(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -137,6 +152,24 @@ class EmbeddedArtifact(BaseModel):
     content: str
     embedding: List[float]
     metadata: Dict[str, Any] = {}
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class IntegrationToken(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    integration: str
+    workspace_id: str
+    access_token: str
+    refresh_token: Optional[str] = None
+    expires_at: Optional[datetime] = None
+    metadata: Dict[str, Any] = {}
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class ExternalIDMapping(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    integration: str
+    external_id: str
+    internal_id: str
+    artifact_type: ArtifactType
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 # API Request/Response Models

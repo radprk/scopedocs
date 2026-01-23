@@ -22,7 +22,9 @@ COLLECTIONS = {
     'people': 'people',
     'relationships': 'relationships',
     'embeddings': 'embeddings',
-    'drift_alerts': 'drift_alerts'
+    'drift_alerts': 'drift_alerts',
+    'integration_tokens': 'integration_tokens',
+    'external_id_mappings': 'external_id_mappings'
 }
 
 async def init_db():
@@ -36,6 +38,8 @@ async def init_db():
     await db[COLLECTIONS['scopedocs']].create_index('project_id')
     await db[COLLECTIONS['relationships']].create_index([('source_id', 1), ('target_id', 1)])
     await db[COLLECTIONS['embeddings']].create_index('artifact_id')
+    await db[COLLECTIONS['integration_tokens']].create_index([('integration', 1), ('workspace_id', 1)])
+    await db[COLLECTIONS['external_id_mappings']].create_index([('integration', 1), ('external_id', 1)])
 
 async def close_db():
     """Close database connection"""

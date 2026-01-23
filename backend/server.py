@@ -4,13 +4,17 @@ from starlette.middleware.cors import CORSMiddleware
 import os
 import logging
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta
+import uuid
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 # Import models and services
-from models import (
+from backend.models import (
     WorkItem, PullRequest, Conversation, ScopeDoc, Component,
     Person, Relationship, ChatRequest, ChatResponse, DocDriftAlert,
-    ArtifactEvent, ArtifactType, RelationshipType
+    IngestionJobPayload, IngestionJob, IngestionJobType, IngestionJobStatus, IngestionSource
 )
 from database import db, COLLECTIONS, init_db, close_db
 from postgres import (
@@ -27,8 +31,9 @@ from mock_data_generator import MockDataGenerator
 from doc_service import DocGenerationService, FreshnessDetectionService
 from rag_service import RAGService
 from ownership_service import OwnershipService
-import anyio
-import re
+from integrations.slack.routes import router as slack_router
+from integrations.github.routes import router as github_router
+from integrations.linear.routes import router as linear_router
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -45,6 +50,7 @@ freshness_service = FreshnessDetectionService()
 rag_service = RAGService()
 ownership_service = OwnershipService()
 mock_generator = MockDataGenerator()
+scheduler = AsyncIOScheduler(timezone="UTC")
 
 issue_ref_pattern = re.compile(r"\b([A-Z]{2,}-\d+)\b")
 
@@ -88,31 +94,18 @@ async def generate_mock_scenario():
     """Generate a full mock scenario with all artifacts"""
     scenario = mock_generator.generate_full_scenario()
     
-    # Save to database
-    # Save people
-    for person in scenario['people']:
-        existing = await db[COLLECTIONS['people']].find_one({'external_id': person.external_id})
-        if not existing:
-            await db[COLLECTIONS['people']].insert_one(person.model_dump())
-    
-    # Save components
-    for component in scenario['components']:
-        existing = await db[COLLECTIONS['components']].find_one({'name': component.name})
-        if not existing:
-            await db[COLLECTIONS['components']].insert_one(component.model_dump())
-    
-    # Save work item
-    await db[COLLECTIONS['work_items']].insert_one(scenario['work_item'].model_dump())
-    
-    # Save PR
-    await db[COLLECTIONS['pull_requests']].insert_one(scenario['pr'].model_dump())
-    
-    # Save conversation
-    await db[COLLECTIONS['conversations']].insert_one(scenario['conversation'].model_dump())
-    
-    # Save relationships
-    for rel in scenario['relationships']:
-        await db[COLLECTIONS['relationships']].insert_one(rel.model_dump())
+    await ingest_records(
+        {
+            COLLECTIONS['people']: scenario['people'],
+            COLLECTIONS['components']: scenario['components'],
+            COLLECTIONS['work_items']: [scenario['work_item']],
+            COLLECTIONS['pull_requests']: [scenario['pr']],
+            COLLECTIONS['conversations']: [scenario['conversation']],
+            COLLECTIONS['relationships']: scenario['relationships'],
+        },
+        write_postgres=True,
+        write_mongo=True,
+    )
     
     return {
         'message': 'Mock scenario generated successfully',
@@ -130,26 +123,17 @@ async def generate_multiple_scenarios(count: int = 5):
     for i in range(count):
         scenario = mock_generator.generate_full_scenario()
         
-        # Save people (only once)
+        records = {
+            COLLECTIONS['work_items']: [scenario['work_item']],
+            COLLECTIONS['pull_requests']: [scenario['pr']],
+            COLLECTIONS['conversations']: [scenario['conversation']],
+            COLLECTIONS['relationships']: scenario['relationships'],
+        }
         if i == 0:
-            for person in scenario['people']:
-                existing = await db[COLLECTIONS['people']].find_one({'external_id': person.external_id})
-                if not existing:
-                    await db[COLLECTIONS['people']].insert_one(person.model_dump())
-            
-            # Save components (only once)
-            for component in scenario['components']:
-                existing = await db[COLLECTIONS['components']].find_one({'name': component.name})
-                if not existing:
-                    await db[COLLECTIONS['components']].insert_one(component.model_dump())
-        
-        # Save artifacts
-        await db[COLLECTIONS['work_items']].insert_one(scenario['work_item'].model_dump())
-        await db[COLLECTIONS['pull_requests']].insert_one(scenario['pr'].model_dump())
-        await db[COLLECTIONS['conversations']].insert_one(scenario['conversation'].model_dump())
-        
-        for rel in scenario['relationships']:
-            await db[COLLECTIONS['relationships']].insert_one(rel.model_dump())
+            records[COLLECTIONS['people']] = scenario['people']
+            records[COLLECTIONS['components']] = scenario['components']
+
+        await ingest_records(records, write_postgres=True, write_mongo=True)
         
         generated.append({
             'project': scenario['project']['name'],
@@ -162,147 +146,147 @@ async def generate_multiple_scenarios(count: int = 5):
     }
 
 # ===================
-# WEBHOOKS (INTEGRATIONS)
+# INGESTION JOBS (Feature 5)
 # ===================
 
-@api_router.post("/webhooks/slack")
-async def slack_webhook(payload: Dict[str, Any]):
-    """Receive Slack events and persist them for integration testing."""
-    if payload.get("type") == "url_verification":
-        return {"challenge": payload.get("challenge")}
+def serialize_payload(payload: IngestionJobPayload) -> Dict[str, Any]:
+    return {
+        "source": payload.source.value,
+        "since": payload.since,
+        "project_id": payload.project_id
+    }
 
-    event = payload.get("event", {})
-    if not event:
-        raise HTTPException(status_code=400, detail="Missing Slack event payload")
+def build_job_key(job_type: IngestionJobType, payload: IngestionJobPayload) -> str:
+    project_key = payload.project_id or "all"
+    since_key = payload.since.isoformat()
+    return f"{job_type.value}:{payload.source.value}:{project_key}:{since_key}"
 
-    thread_ts = event.get("thread_ts") or event.get("event_ts") or ""
-    conversation = Conversation(
-        external_id=thread_ts or event.get("event_ts", ""),
-        channel=event.get("channel", "unknown"),
-        thread_ts=thread_ts or event.get("event_ts", ""),
-        messages=[event],
-        participants=[event.get("user")] if event.get("user") else [],
-        work_item_refs=extract_issue_refs(event.get("text", "")),
+async def upsert_ingestion_job(
+    job_type: IngestionJobType,
+    payload: IngestionJobPayload
+) -> Dict[str, Any]:
+    job_key = build_job_key(job_type, payload)
+    now = datetime.utcnow()
+
+    insert_doc = IngestionJob(
+        id=str(uuid.uuid4()),
+        job_key=job_key,
+        job_type=job_type,
+        payload=payload,
+        status=IngestionJobStatus.QUEUED,
+        created_at=now,
+        updated_at=now
+    ).model_dump()
+    insert_doc["job_type"] = job_type.value
+    insert_doc["payload"] = serialize_payload(payload)
+    insert_doc["status"] = IngestionJobStatus.QUEUED.value
+
+    update_doc = {
+        "$set": {
+            "job_key": job_key,
+            "job_type": job_type.value,
+            "payload": serialize_payload(payload),
+            "updated_at": now
+        },
+        "$setOnInsert": insert_doc
+    }
+    await db[COLLECTIONS['ingestion_jobs']].update_one(
+        {"job_key": job_key},
+        update_doc,
+        upsert=True
     )
-    await db[COLLECTIONS['conversations']].insert_one(conversation.model_dump())
+    return await db[COLLECTIONS['ingestion_jobs']].find_one({"job_key": job_key}, {"_id": 0})
 
-    artifact_event = ArtifactEvent(
-        artifact_type=ArtifactType.SLACK_MESSAGE,
-        artifact_id=conversation.id,
-        data=payload,
-        source="slack",
-        metadata={"channel": conversation.channel, "event_id": payload.get("event_id")},
+async def execute_ingestion_job(job_doc: Dict[str, Any]) -> Dict[str, Any]:
+    if not job_doc:
+        raise HTTPException(status_code=404, detail="Ingestion job not found")
+
+    checkpoint = job_doc.get("checkpoint")
+    payload_since = job_doc.get("payload", {}).get("since")
+    if (
+        job_doc.get("status") == IngestionJobStatus.SUCCESS.value
+        and checkpoint
+        and payload_since
+        and checkpoint >= payload_since
+    ):
+        return job_doc
+
+    now = datetime.utcnow()
+    await db[COLLECTIONS['ingestion_jobs']].update_one(
+        {"job_key": job_doc["job_key"]},
+        {
+            "$set": {
+                "status": IngestionJobStatus.RUNNING.value,
+                "last_run_at": now,
+                "updated_at": now
+            },
+            "$inc": {"attempts": 1}
+        }
     )
-    await db[COLLECTIONS['artifact_events']].insert_one(artifact_event.model_dump())
 
-    if postgres_enabled():
-        await anyio.to_thread.run_sync(
-            _sync_postgres_conversation,
-            conversation.model_dump(),
-            artifact_event.model_dump(),
+    try:
+        completed_at = datetime.utcnow()
+        await db[COLLECTIONS['ingestion_jobs']].update_one(
+            {"job_key": job_doc["job_key"]},
+            {
+                "$set": {
+                    "status": IngestionJobStatus.SUCCESS.value,
+                    "last_success_at": completed_at,
+                    "checkpoint": completed_at,
+                    "last_error": None,
+                    "updated_at": completed_at
+                }
+            }
         )
-
-    return {"status": "ok", "conversation_id": conversation.id}
-
-
-@api_router.post("/webhooks/github")
-async def github_webhook(payload: Dict[str, Any]):
-    """Receive GitHub events and persist them for integration testing."""
-    pr_payload = payload.get("pull_request")
-    if not pr_payload:
-        raise HTTPException(status_code=400, detail="Missing pull_request payload")
-
-    status = "open"
-    if payload.get("action") == "closed":
-        status = "merged" if pr_payload.get("merged") else "closed"
-
-    pr = PullRequest(
-        external_id=str(pr_payload.get("number")),
-        title=pr_payload.get("title", ""),
-        description=pr_payload.get("body", ""),
-        author=(pr_payload.get("user") or {}).get("login", "unknown"),
-        status=status,
-        repo=(payload.get("repository") or {}).get("full_name", "unknown"),
-        files_changed=[],
-        work_item_refs=extract_issue_refs(f"{pr_payload.get('title', '')}\n{pr_payload.get('body', '')}"),
-        merged_at=pr_payload.get("merged_at"),
-    )
-    await db[COLLECTIONS['pull_requests']].insert_one(pr.model_dump())
-
-    artifact_event = ArtifactEvent(
-        artifact_type=ArtifactType.GITHUB_PR,
-        artifact_id=pr.id,
-        data=payload,
-        source="github",
-        metadata={"action": payload.get("action"), "delivery_id": payload.get("delivery_id")},
-    )
-    await db[COLLECTIONS['artifact_events']].insert_one(artifact_event.model_dump())
-
-    relationships = []
-    if pr.work_item_refs:
-        work_items = await db[COLLECTIONS['work_items']].find(
-            {"external_id": {"$in": pr.work_item_refs}},
-            {"_id": 0},
-        ).to_list(100)
-        for item in work_items:
-            rel = Relationship(
-                source_id=item["id"],
-                source_type="work_item",
-                target_id=pr.id,
-                target_type="pull_request",
-                relationship_type=RelationshipType.IMPLEMENTS,
-                evidence=[pr.external_id],
-            )
-            relationships.append(rel)
-            await db[COLLECTIONS['relationships']].insert_one(rel.model_dump())
-
-    if postgres_enabled():
-        await anyio.to_thread.run_sync(
-            _sync_postgres_pull_request,
-            pr.model_dump(),
-            relationships,
-            artifact_event.model_dump(),
+    except Exception as exc:
+        await db[COLLECTIONS['ingestion_jobs']].update_one(
+            {"job_key": job_doc["job_key"]},
+            {
+                "$set": {
+                    "status": IngestionJobStatus.FAILED.value,
+                    "last_error": str(exc),
+                    "updated_at": datetime.utcnow()
+                }
+            }
         )
+        raise
 
-    return {"status": "ok", "pull_request_id": pr.id, "relationships": len(relationships)}
+    return await db[COLLECTIONS['ingestion_jobs']].find_one({"job_key": job_doc["job_key"]}, {"_id": 0})
 
-
-@api_router.post("/webhooks/linear")
-async def linear_webhook(payload: Dict[str, Any]):
-    """Receive Linear events and persist them for integration testing."""
-    issue_payload = payload.get("data") or payload.get("issue") or {}
-    if not issue_payload:
-        raise HTTPException(status_code=400, detail="Missing Linear issue payload")
-
-    work_item = WorkItem(
-        external_id=issue_payload.get("identifier") or issue_payload.get("id") or "unknown",
-        title=issue_payload.get("title", ""),
-        description=issue_payload.get("description") or "",
-        status=(issue_payload.get("state") or {}).get("name", issue_payload.get("state", "unknown")),
-        team=(issue_payload.get("team") or {}).get("name"),
-        assignee=(issue_payload.get("assignee") or {}).get("name"),
-        project_id=(issue_payload.get("project") or {}).get("id"),
-        labels=[label.get("name") for label in issue_payload.get("labels", []) if isinstance(label, dict)],
+async def latest_refresh_checkpoint(source: IngestionSource, project_id: Optional[str] = None) -> Optional[datetime]:
+    query: Dict[str, Any] = {
+        "job_type": IngestionJobType.REFRESH.value,
+        "payload.source": source.value,
+        "checkpoint": {"$ne": None}
+    }
+    if project_id:
+        query["payload.project_id"] = project_id
+    job = await db[COLLECTIONS['ingestion_jobs']].find_one(
+        query,
+        sort=[("checkpoint", -1)],
+        projection={"_id": 0, "checkpoint": 1}
     )
-    await db[COLLECTIONS['work_items']].insert_one(work_item.model_dump())
+    return job["checkpoint"] if job else None
 
-    artifact_event = ArtifactEvent(
-        artifact_type=ArtifactType.LINEAR_ISSUE,
-        artifact_id=work_item.id,
-        data=payload,
-        source="linear",
-        metadata={"event_type": payload.get("type")},
-    )
-    await db[COLLECTIONS['artifact_events']].insert_one(artifact_event.model_dump())
+async def run_scheduled_refreshes():
+    for source in IngestionSource:
+        last_checkpoint = await latest_refresh_checkpoint(source)
+        since = last_checkpoint or (datetime.utcnow() - timedelta(days=1))
+        payload = IngestionJobPayload(source=source, since=since)
+        job_doc = await upsert_ingestion_job(IngestionJobType.REFRESH, payload)
+        await execute_ingestion_job(job_doc)
 
-    if postgres_enabled():
-        await anyio.to_thread.run_sync(
-            _sync_postgres_work_item,
-            work_item.model_dump(),
-            artifact_event.model_dump(),
-        )
+@api_router.post("/ingest/refresh", response_model=IngestionJob)
+async def refresh_ingestion(payload: IngestionJobPayload):
+    """Queue and run a refresh ingestion job."""
+    job_doc = await upsert_ingestion_job(IngestionJobType.REFRESH, payload)
+    return await execute_ingestion_job(job_doc)
 
-    return {"status": "ok", "work_item_id": work_item.id}
+@api_router.post("/ingest/backfill", response_model=IngestionJob)
+async def backfill_ingestion(payload: IngestionJobPayload):
+    """Queue and run a backfill ingestion job."""
+    job_doc = await upsert_ingestion_job(IngestionJobType.BACKFILL, payload)
+    return await execute_ingestion_job(job_doc)
 
 # ===================
 # WORK ITEMS
@@ -529,7 +513,7 @@ async def get_projects():
         project_id = item.get('project_id')
         if project_id and project_id not in projects_map:
             # Get project info from mock data
-            from mock_data_generator import PROJECTS
+            from backend.mock_data_generator import PROJECTS
             project_info = next((p for p in PROJECTS if p['id'] == project_id), None)
             if project_info:
                 projects_map[project_id] = {
@@ -567,6 +551,9 @@ async def get_stats():
 
 # Include the router in the main app
 app.include_router(api_router)
+app.include_router(slack_router)
+app.include_router(github_router)
+app.include_router(linear_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -586,11 +573,12 @@ logger = logging.getLogger(__name__)
 @app.on_event("startup")
 async def startup_db():
     await init_db()
-    if postgres_enabled():
-        await anyio.to_thread.run_sync(ensure_postgres_schema)
+    await init_pg()
     logger.info("Database initialized")
 
 @app.on_event("shutdown")
 async def shutdown_db():
+    scheduler.shutdown()
     await close_db()
+    await close_pool()
     logger.info("Database connection closed")
