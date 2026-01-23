@@ -1,16 +1,20 @@
 from fastapi import FastAPI, APIRouter, HTTPException
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta
+import uuid
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 # Import models and services
 from models import (
     WorkItem, PullRequest, Conversation, ScopeDoc, Component,
-    Person, Relationship, ChatRequest, ChatResponse, DocDriftAlert
+    Person, Relationship, ChatRequest, ChatResponse, DocDriftAlert,
+    IngestionJobPayload, IngestionJob, IngestionJobType, IngestionJobStatus, IngestionSource
 )
 from database import db, COLLECTIONS, init_db, close_db
 from mock_data_generator import MockDataGenerator
@@ -33,6 +37,7 @@ freshness_service = FreshnessDetectionService()
 rag_service = RAGService()
 ownership_service = OwnershipService()
 mock_generator = MockDataGenerator()
+scheduler = AsyncIOScheduler(timezone="UTC")
 
 # ===================
 # MOCK DATA ENDPOINTS
@@ -115,6 +120,149 @@ async def generate_multiple_scenarios(count: int = 5):
         'message': f'Generated {count} mock scenarios',
         'scenarios': generated
     }
+
+# ===================
+# INGESTION JOBS (Feature 5)
+# ===================
+
+def serialize_payload(payload: IngestionJobPayload) -> Dict[str, Any]:
+    return {
+        "source": payload.source.value,
+        "since": payload.since,
+        "project_id": payload.project_id
+    }
+
+def build_job_key(job_type: IngestionJobType, payload: IngestionJobPayload) -> str:
+    project_key = payload.project_id or "all"
+    since_key = payload.since.isoformat()
+    return f"{job_type.value}:{payload.source.value}:{project_key}:{since_key}"
+
+async def upsert_ingestion_job(
+    job_type: IngestionJobType,
+    payload: IngestionJobPayload
+) -> Dict[str, Any]:
+    job_key = build_job_key(job_type, payload)
+    now = datetime.utcnow()
+
+    insert_doc = IngestionJob(
+        id=str(uuid.uuid4()),
+        job_key=job_key,
+        job_type=job_type,
+        payload=payload,
+        status=IngestionJobStatus.QUEUED,
+        created_at=now,
+        updated_at=now
+    ).model_dump()
+    insert_doc["job_type"] = job_type.value
+    insert_doc["payload"] = serialize_payload(payload)
+    insert_doc["status"] = IngestionJobStatus.QUEUED.value
+
+    update_doc = {
+        "$set": {
+            "job_key": job_key,
+            "job_type": job_type.value,
+            "payload": serialize_payload(payload),
+            "updated_at": now
+        },
+        "$setOnInsert": insert_doc
+    }
+    await db[COLLECTIONS['ingestion_jobs']].update_one(
+        {"job_key": job_key},
+        update_doc,
+        upsert=True
+    )
+    return await db[COLLECTIONS['ingestion_jobs']].find_one({"job_key": job_key}, {"_id": 0})
+
+async def execute_ingestion_job(job_doc: Dict[str, Any]) -> Dict[str, Any]:
+    if not job_doc:
+        raise HTTPException(status_code=404, detail="Ingestion job not found")
+
+    checkpoint = job_doc.get("checkpoint")
+    payload_since = job_doc.get("payload", {}).get("since")
+    if (
+        job_doc.get("status") == IngestionJobStatus.SUCCESS.value
+        and checkpoint
+        and payload_since
+        and checkpoint >= payload_since
+    ):
+        return job_doc
+
+    now = datetime.utcnow()
+    await db[COLLECTIONS['ingestion_jobs']].update_one(
+        {"job_key": job_doc["job_key"]},
+        {
+            "$set": {
+                "status": IngestionJobStatus.RUNNING.value,
+                "last_run_at": now,
+                "updated_at": now
+            },
+            "$inc": {"attempts": 1}
+        }
+    )
+
+    try:
+        completed_at = datetime.utcnow()
+        await db[COLLECTIONS['ingestion_jobs']].update_one(
+            {"job_key": job_doc["job_key"]},
+            {
+                "$set": {
+                    "status": IngestionJobStatus.SUCCESS.value,
+                    "last_success_at": completed_at,
+                    "checkpoint": completed_at,
+                    "last_error": None,
+                    "updated_at": completed_at
+                }
+            }
+        )
+    except Exception as exc:
+        await db[COLLECTIONS['ingestion_jobs']].update_one(
+            {"job_key": job_doc["job_key"]},
+            {
+                "$set": {
+                    "status": IngestionJobStatus.FAILED.value,
+                    "last_error": str(exc),
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        raise
+
+    return await db[COLLECTIONS['ingestion_jobs']].find_one({"job_key": job_doc["job_key"]}, {"_id": 0})
+
+async def latest_refresh_checkpoint(source: IngestionSource, project_id: Optional[str] = None) -> Optional[datetime]:
+    query: Dict[str, Any] = {
+        "job_type": IngestionJobType.REFRESH.value,
+        "payload.source": source.value,
+        "checkpoint": {"$ne": None}
+    }
+    if project_id:
+        query["payload.project_id"] = project_id
+    job = await db[COLLECTIONS['ingestion_jobs']].find_one(
+        query,
+        sort=[("checkpoint", -1)],
+        projection={"_id": 0, "checkpoint": 1}
+    )
+    return job["checkpoint"] if job else None
+
+async def run_scheduled_refreshes():
+    for source in IngestionSource:
+        last_checkpoint = await latest_refresh_checkpoint(source)
+        since = last_checkpoint or (datetime.utcnow() - timedelta(days=1))
+        payload = IngestionJobPayload(source=source, since=since)
+        job_doc = await upsert_ingestion_job(IngestionJobType.REFRESH, payload)
+        await execute_ingestion_job(job_doc)
+
+@api_router.post("/ingest/refresh", response_model=IngestionJob)
+async def refresh_ingestion(payload: IngestionJobPayload):
+    """Queue and run a refresh ingestion job."""
+    job_doc = await upsert_ingestion_job(IngestionJobType.REFRESH, payload)
+    return await execute_ingestion_job(job_doc)
+
+@api_router.post("/ingest/backfill", response_model=IngestionJob)
+async def backfill_ingestion(payload: IngestionJobPayload):
+    """Queue and run a backfill ingestion job."""
+    job_doc = await upsert_ingestion_job(IngestionJobType.BACKFILL, payload)
+    return await execute_ingestion_job(job_doc)
 
 # ===================
 # WORK ITEMS
@@ -388,9 +536,13 @@ logger = logging.getLogger(__name__)
 @app.on_event("startup")
 async def startup_db():
     await init_db()
+    scheduler.add_job(run_scheduled_refreshes, CronTrigger(hour=0, minute=0))
+    scheduler.start()
+    await run_scheduled_refreshes()
     logger.info("Database initialized")
 
 @app.on_event("shutdown")
 async def shutdown_db():
+    scheduler.shutdown()
     await close_db()
     logger.info("Database connection closed")

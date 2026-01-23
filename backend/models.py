@@ -31,6 +31,21 @@ class FreshnessLevel(str, Enum):
     STALE = "stale"
     OUTDATED = "outdated"
 
+class IngestionSource(str, Enum):
+    GITHUB = "github"
+    SLACK = "slack"
+    LINEAR = "linear"
+
+class IngestionJobType(str, Enum):
+    REFRESH = "refresh"
+    BACKFILL = "backfill"
+
+class IngestionJobStatus(str, Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
+
 # Base Models
 class ArtifactEvent(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -138,6 +153,25 @@ class EmbeddedArtifact(BaseModel):
     embedding: List[float]
     metadata: Dict[str, Any] = {}
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class IngestionJobPayload(BaseModel):
+    source: IngestionSource
+    since: datetime
+    project_id: Optional[str] = None
+
+class IngestionJob(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    job_key: str
+    job_type: IngestionJobType
+    payload: IngestionJobPayload
+    status: IngestionJobStatus = IngestionJobStatus.QUEUED
+    attempts: int = 0
+    last_error: Optional[str] = None
+    last_run_at: Optional[datetime] = None
+    last_success_at: Optional[datetime] = None
+    checkpoint: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 # API Request/Response Models
 class ChatMessage(BaseModel):
