@@ -4,9 +4,9 @@ from typing import Any, Dict, Optional
 import httpx
 from fastapi import APIRouter, HTTPException
 
-from database import db, COLLECTIONS
-from ingest.normalize import normalize_linear_issue
-from integrations.auth import build_token_from_env, get_integration_token
+from backend.database import db, COLLECTIONS
+from backend.ingest.normalize import normalize_linear_issue
+from backend.integrations.auth import build_token_from_env, get_integration_token
 
 router = APIRouter(prefix="/api/integrations/linear", tags=["integrations", "linear"])
 

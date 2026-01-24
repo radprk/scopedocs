@@ -2,8 +2,8 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException
 
-from database import db, COLLECTIONS
-from ingest.normalize import normalize_slack_event
+from backend.database import db, COLLECTIONS
+from backend.ingest.normalize import normalize_slack_event
 
 router = APIRouter(prefix="/api/integrations/slack", tags=["integrations", "slack"])
 

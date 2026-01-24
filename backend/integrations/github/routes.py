@@ -2,8 +2,8 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException, Request
 
-from database import db, COLLECTIONS
-from ingest.normalize import (
+from backend.database import db, COLLECTIONS
+from backend.ingest.normalize import (
     normalize_github_pull_request,
     normalize_github_review,
     normalize_github_push,

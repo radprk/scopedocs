@@ -194,3 +194,22 @@ class DocDriftAlert(BaseModel):
     trigger_id: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
     severity: str = "medium"  # low, medium, high
+
+class IngestionJobPayload(BaseModel):
+    source: IngestionSource
+    since: datetime
+    project_id: Optional[str] = None
+
+class IngestionJob(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    job_key: str
+    job_type: IngestionJobType
+    payload: IngestionJobPayload
+    status: IngestionJobStatus = IngestionJobStatus.QUEUED
+    attempts: int = 0
+    checkpoint: Optional[datetime] = None
+    last_run_at: Optional[datetime] = None
+    last_success_at: Optional[datetime] = None
+    last_error: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)

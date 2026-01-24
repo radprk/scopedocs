@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 
-from models import (
+from backend.models import (
     Conversation,
     PullRequest,
     WorkItem,
@@ -11,7 +11,7 @@ from models import (
     RelationshipType,
     ArtifactType,
 )
-from database import db, COLLECTIONS
+from backend.database import db, COLLECTIONS
 
 LINEAR_KEY_PATTERN = re.compile(r"\b[A-Z]{2,10}-\d+\b")
 PR_REFERENCE_PATTERN = re.compile(r"#(\d+)")

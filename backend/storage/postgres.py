@@ -105,6 +105,30 @@ async def init_pg() -> None:
                 updated_at timestamptz NOT NULL DEFAULT NOW(),
                 PRIMARY KEY (source, state_key)
             );
+            CREATE TABLE IF NOT EXISTS external_id_mappings (
+                id text PRIMARY KEY,
+                integration text NOT NULL,
+                external_id text NOT NULL,
+                internal_id text NOT NULL,
+                artifact_type text NOT NULL,
+                created_at timestamptz NOT NULL DEFAULT NOW(),
+                UNIQUE (integration, external_id, artifact_type)
+            );
+            CREATE TABLE IF NOT EXISTS integration_tokens (
+                id text PRIMARY KEY,
+                integration text NOT NULL,
+                workspace_id text NOT NULL,
+                data jsonb NOT NULL,
+                updated_at timestamptz NOT NULL DEFAULT NOW(),
+                UNIQUE (integration, workspace_id)
+            );
+            CREATE TABLE IF NOT EXISTS ingestion_jobs (
+                id text PRIMARY KEY,
+                job_key text UNIQUE NOT NULL,
+                job_type text NOT NULL,
+                data jsonb NOT NULL,
+                updated_at timestamptz NOT NULL DEFAULT NOW()
+            );
             """
         )
 
@@ -394,3 +418,183 @@ async def upsert_drift_alert(payload: Any) -> None:
             data,
             datetime.utcnow(),
         )
+
+
+async def upsert_external_id_mapping(payload: Any) -> None:
+    data = _normalize_payload(payload)
+    item_id = _ensure_id(data)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO external_id_mappings (id, integration, external_id, internal_id, artifact_type, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (integration, external_id, artifact_type)
+            DO UPDATE SET
+                internal_id = EXCLUDED.internal_id
+            """,
+            item_id,
+            data.get("integration"),
+            data.get("external_id"),
+            data.get("internal_id"),
+            data.get("artifact_type"),
+            data.get("created_at", datetime.utcnow()),
+        )
+
+
+async def get_external_id_mapping(integration: str, external_id: str, artifact_type: str) -> Optional[Dict[str, Any]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, integration, external_id, internal_id, artifact_type, created_at
+            FROM external_id_mappings
+            WHERE integration = $1 AND external_id = $2 AND artifact_type = $3
+            """,
+            integration,
+            external_id,
+            artifact_type,
+        )
+        if not row:
+            return None
+        return dict(row)
+
+
+async def upsert_integration_token(payload: Any) -> None:
+    data = _normalize_payload(payload)
+    item_id = _ensure_id(data)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO integration_tokens (id, integration, workspace_id, data, updated_at)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (integration, workspace_id)
+            DO UPDATE SET
+                data = EXCLUDED.data,
+                updated_at = EXCLUDED.updated_at
+            """,
+            item_id,
+            data.get("integration"),
+            data.get("workspace_id"),
+            data,
+            datetime.utcnow(),
+        )
+
+
+async def get_integration_token(integration: str, workspace_id: str) -> Optional[Dict[str, Any]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT data FROM integration_tokens
+            WHERE integration = $1 AND workspace_id = $2
+            """,
+            integration,
+            workspace_id,
+        )
+        if not row:
+            return None
+        return row["data"]
+
+
+async def upsert_ingestion_job(payload: Any) -> None:
+    data = _normalize_payload(payload)
+    item_id = _ensure_id(data)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO ingestion_jobs (id, job_key, job_type, data, updated_at)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (job_key)
+            DO UPDATE SET
+                data = EXCLUDED.data,
+                updated_at = EXCLUDED.updated_at
+            """,
+            item_id,
+            data.get("job_key"),
+            data.get("job_type"),
+            data,
+            datetime.utcnow(),
+        )
+
+
+async def get_ingestion_job(job_key: str) -> Optional[Dict[str, Any]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT data FROM ingestion_jobs WHERE job_key = $1
+            """,
+            job_key,
+        )
+        if not row:
+            return None
+        return row["data"]
+
+
+async def update_ingestion_job(job_key: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT data FROM ingestion_jobs WHERE job_key = $1
+            """,
+            job_key,
+        )
+        if not row:
+            return None
+        current_data = row["data"]
+        current_data.update(updates)
+        current_data["updated_at"] = datetime.utcnow().isoformat()
+        await conn.execute(
+            """
+            UPDATE ingestion_jobs SET data = $1, updated_at = $2 WHERE job_key = $3
+            """,
+            current_data,
+            datetime.utcnow(),
+            job_key,
+        )
+        return current_data
+
+
+async def find_latest_ingestion_checkpoint(job_type: str, source: str, project_id: Optional[str] = None) -> Optional[datetime]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        if project_id:
+            row = await conn.fetchrow(
+                """
+                SELECT data->>'checkpoint' as checkpoint
+                FROM ingestion_jobs
+                WHERE job_type = $1
+                  AND data->>'payload'->>'source' = $2
+                  AND data->>'payload'->>'project_id' = $3
+                  AND data->>'checkpoint' IS NOT NULL
+                ORDER BY data->>'checkpoint' DESC
+                LIMIT 1
+                """,
+                job_type,
+                source,
+                project_id,
+            )
+        else:
+            row = await conn.fetchrow(
+                """
+                SELECT data->>'checkpoint' as checkpoint
+                FROM ingestion_jobs
+                WHERE job_type = $1
+                  AND data->'payload'->>'source' = $2
+                  AND data->>'checkpoint' IS NOT NULL
+                ORDER BY data->>'checkpoint' DESC
+                LIMIT 1
+                """,
+                job_type,
+                source,
+            )
+        if not row or not row["checkpoint"]:
+            return None
+        try:
+            return datetime.fromisoformat(row["checkpoint"].replace('Z', '+00:00'))
+        except (ValueError, AttributeError):
+            return None
