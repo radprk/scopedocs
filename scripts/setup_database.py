@@ -144,7 +144,8 @@ async def setup_database():
     try:
         # Parse DSN manually (asyncpg has issues with Supabase's format)
         db_config = parse_supabase_dsn(dsn)
-        conn = await asyncpg.connect(**db_config)
+        # Supabase requires SSL
+        conn = await asyncpg.connect(**db_config, ssl='require')
 
         print("📡 Connected to Supabase")
         print("📝 Creating tables...")
