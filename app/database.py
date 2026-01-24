@@ -45,6 +45,11 @@ async def close_pool():
         await pool.close()
 
 
+def get_pool():
+    """Get the database pool."""
+    return pool
+
+
 async def get_connection():
     """Get a connection from the pool."""
     return pool.acquire()

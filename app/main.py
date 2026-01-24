@@ -24,7 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 import uvicorn
 
-from .database import init_pool, close_pool, pool, run_migrations
+from .database import init_pool, close_pool, get_pool, run_migrations
 from .oauth import get_authorize_url, exchange_code_for_token, get_user_info
 from .sync import sync_linear, sync_github, sync_slack, create_links
 
@@ -90,7 +90,7 @@ async def get_current_user(request: Request) -> UUID:
 
 async def get_or_create_user(email: str, name: str = None) -> UUID:
     """Get or create a user by email."""
-    async with pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         # Check if user exists
         row = await conn.fetchrow("SELECT id FROM users WHERE email = $1", email)
         if row:
@@ -120,7 +120,7 @@ async def signup(email: str, name: str = None):
 @app.get("/auth/me", tags=["Auth"])
 async def get_me(user_id: UUID = Depends(get_current_user)):
     """Get current user info."""
-    async with pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         user = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
@@ -185,7 +185,7 @@ async def oauth_callback(provider: str, code: str, state: str):
         workspace_info = await get_user_info(provider, access_token)
 
         # Store token
-        async with pool.acquire() as conn:
+        async with get_pool().acquire() as conn:
             await conn.execute("""
                 INSERT INTO user_integrations (user_id, provider, access_token, refresh_token, workspace_info)
                 VALUES ($1, $2, $3, $4, $5)
@@ -220,7 +220,7 @@ async def trigger_sync(
     if provider not in ['linear', 'github', 'slack', 'all']:
         raise HTTPException(status_code=400, detail="Invalid provider")
 
-    async with pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         # Get user's tokens
         integrations = await conn.fetch(
             "SELECT provider, access_token FROM user_integrations WHERE user_id = $1",
@@ -262,7 +262,7 @@ async def trigger_sync(
 @app.get("/stats", tags=["Query"])
 async def get_stats(user_id: UUID = Depends(get_current_user)):
     """Get sync statistics for current user."""
-    async with pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         stats = {
             "linear_issues": await conn.fetchval(
                 "SELECT COUNT(*) FROM linear_issues WHERE user_id = $1", user_id
@@ -286,7 +286,7 @@ async def get_context(issue_id: str, user_id: UUID = Depends(get_current_user)):
     Get full context for a Linear issue - THE MAIN VALUE!
     Returns the issue with all linked PRs and Slack discussions.
     """
-    async with pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         # Get issue
         issue = await conn.fetchrow(
             "SELECT * FROM linear_issues WHERE identifier = $1 AND user_id = $2",
@@ -351,7 +351,7 @@ async def list_issues(
     user_id: UUID = Depends(get_current_user)
 ):
     """List Linear issues for current user."""
-    async with pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         query = "SELECT identifier, title, status, team_name, assignee_name FROM linear_issues WHERE user_id = $1"
         params = [user_id]
 
@@ -370,7 +370,7 @@ async def list_issues(
 @app.get("/search", tags=["Query"])
 async def search(q: str, user_id: UUID = Depends(get_current_user)):
     """Search across all data sources."""
-    async with pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         results = {"issues": [], "prs": [], "messages": []}
 
         issues = await conn.fetch("""
