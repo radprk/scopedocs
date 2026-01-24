@@ -2,6 +2,7 @@ from fastapi import FastAPI, APIRouter, HTTPException
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 import os
+import re
 import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -16,24 +17,23 @@ from backend.models import (
     Person, Relationship, ChatRequest, ChatResponse, DocDriftAlert,
     IngestionJobPayload, IngestionJob, IngestionJobType, IngestionJobStatus, IngestionSource
 )
-from database import db, COLLECTIONS, init_db, close_db
-from postgres import (
-    postgres_enabled,
-    ensure_postgres_schema,
-    postgres_connection,
-    upsert_work_item,
-    upsert_pull_request,
-    upsert_conversation,
-    insert_relationship,
-    insert_artifact_event,
+from backend.database import db, COLLECTIONS, init_db, close_db
+from backend.storage.postgres import (
+    get_pool,
+    close_pool,
+    init_pg,
+    get_ingestion_job,
+    update_ingestion_job,
+    find_latest_ingestion_checkpoint,
 )
-from mock_data_generator import MockDataGenerator
-from doc_service import DocGenerationService, FreshnessDetectionService
-from rag_service import RAGService
-from ownership_service import OwnershipService
-from integrations.slack.routes import router as slack_router
-from integrations.github.routes import router as github_router
-from integrations.linear.routes import router as linear_router
+from backend.mock_data_generator import MockDataGenerator
+from backend.doc_service import DocGenerationService, FreshnessDetectionService
+from backend.rag_service import RAGService
+from backend.ownership_service import OwnershipService
+from backend.integrations.slack.routes import router as slack_router
+from backend.integrations.github.routes import router as github_router
+from backend.integrations.linear.routes import router as linear_router
+from backend.ingest.pipeline import ingest_records
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -59,32 +59,6 @@ def extract_issue_refs(text: str) -> List[str]:
     return list({match.group(1) for match in issue_ref_pattern.finditer(text or "")})
 
 
-def _sync_postgres_work_item(work_item: Dict[str, Any], artifact_event: Dict[str, Any]) -> None:
-    ensure_postgres_schema()
-    with postgres_connection() as conn:
-        upsert_work_item(conn, work_item)
-        insert_artifact_event(conn, artifact_event)
-
-
-def _sync_postgres_pull_request(
-    pull_request: Dict[str, Any],
-    relationships: List[Relationship],
-    artifact_event: Dict[str, Any],
-) -> None:
-    ensure_postgres_schema()
-    with postgres_connection() as conn:
-        upsert_pull_request(conn, pull_request)
-        for relationship in relationships:
-            insert_relationship(conn, relationship.model_dump())
-        insert_artifact_event(conn, artifact_event)
-
-
-def _sync_postgres_conversation(conversation: Dict[str, Any], artifact_event: Dict[str, Any]) -> None:
-    ensure_postgres_schema()
-    with postgres_connection() as conn:
-        upsert_conversation(conn, conversation)
-        insert_artifact_event(conn, artifact_event)
-
 # ===================
 # MOCK DATA ENDPOINTS
 # ===================
@@ -93,7 +67,7 @@ def _sync_postgres_conversation(conversation: Dict[str, Any], artifact_event: Di
 async def generate_mock_scenario():
     """Generate a full mock scenario with all artifacts"""
     scenario = mock_generator.generate_full_scenario()
-    
+
     await ingest_records(
         {
             COLLECTIONS['people']: scenario['people'],
@@ -102,11 +76,9 @@ async def generate_mock_scenario():
             COLLECTIONS['pull_requests']: [scenario['pr']],
             COLLECTIONS['conversations']: [scenario['conversation']],
             COLLECTIONS['relationships']: scenario['relationships'],
-        },
-        write_postgres=True,
-        write_mongo=True,
+        }
     )
-    
+
     return {
         'message': 'Mock scenario generated successfully',
         'project': scenario['project'],
@@ -119,10 +91,10 @@ async def generate_mock_scenario():
 async def generate_multiple_scenarios(count: int = 5):
     """Generate multiple mock scenarios"""
     generated = []
-    
+
     for i in range(count):
         scenario = mock_generator.generate_full_scenario()
-        
+
         records = {
             COLLECTIONS['work_items']: [scenario['work_item']],
             COLLECTIONS['pull_requests']: [scenario['pr']],
@@ -133,13 +105,13 @@ async def generate_multiple_scenarios(count: int = 5):
             records[COLLECTIONS['people']] = scenario['people']
             records[COLLECTIONS['components']] = scenario['components']
 
-        await ingest_records(records, write_postgres=True, write_mongo=True)
-        
+        await ingest_records(records)
+
         generated.append({
             'project': scenario['project']['name'],
             'work_item': scenario['work_item'].external_id
         })
-    
+
     return {
         'message': f'Generated {count} mock scenarios',
         'scenarios': generated
@@ -152,13 +124,13 @@ async def generate_multiple_scenarios(count: int = 5):
 def serialize_payload(payload: IngestionJobPayload) -> Dict[str, Any]:
     return {
         "source": payload.source.value,
-        "since": payload.since,
+        "since": payload.since.isoformat() if payload.since else None,
         "project_id": payload.project_id
     }
 
 def build_job_key(job_type: IngestionJobType, payload: IngestionJobPayload) -> str:
     project_key = payload.project_id or "all"
-    since_key = payload.since.isoformat()
+    since_key = payload.since.isoformat() if payload.since else "none"
     return f"{job_type.value}:{payload.source.value}:{project_key}:{since_key}"
 
 async def upsert_ingestion_job(
@@ -168,41 +140,38 @@ async def upsert_ingestion_job(
     job_key = build_job_key(job_type, payload)
     now = datetime.utcnow()
 
-    insert_doc = IngestionJob(
-        id=str(uuid.uuid4()),
-        job_key=job_key,
-        job_type=job_type,
-        payload=payload,
-        status=IngestionJobStatus.QUEUED,
-        created_at=now,
-        updated_at=now
-    ).model_dump()
-    insert_doc["job_type"] = job_type.value
-    insert_doc["payload"] = serialize_payload(payload)
-    insert_doc["status"] = IngestionJobStatus.QUEUED.value
+    # Check if job exists
+    existing = await get_ingestion_job(job_key)
+    if existing:
+        # Update existing job
+        await update_ingestion_job(job_key, {
+            "updated_at": now.isoformat()
+        })
+        return await get_ingestion_job(job_key)
 
-    update_doc = {
-        "$set": {
-            "job_key": job_key,
-            "job_type": job_type.value,
-            "payload": serialize_payload(payload),
-            "updated_at": now
-        },
-        "$setOnInsert": insert_doc
+    # Create new job
+    job_doc = {
+        "id": str(uuid.uuid4()),
+        "job_key": job_key,
+        "job_type": job_type.value,
+        "payload": serialize_payload(payload),
+        "status": IngestionJobStatus.QUEUED.value,
+        "attempts": 0,
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat()
     }
-    await db[COLLECTIONS['ingestion_jobs']].update_one(
-        {"job_key": job_key},
-        update_doc,
-        upsert=True
-    )
-    return await db[COLLECTIONS['ingestion_jobs']].find_one({"job_key": job_key}, {"_id": 0})
+
+    await db[COLLECTIONS['ingestion_jobs']].insert_one(job_doc)
+    return job_doc
 
 async def execute_ingestion_job(job_doc: Dict[str, Any]) -> Dict[str, Any]:
     if not job_doc:
         raise HTTPException(status_code=404, detail="Ingestion job not found")
 
+    job_key = job_doc.get("job_key")
     checkpoint = job_doc.get("checkpoint")
     payload_since = job_doc.get("payload", {}).get("since")
+
     if (
         job_doc.get("status") == IngestionJobStatus.SUCCESS.value
         and checkpoint
@@ -212,61 +181,31 @@ async def execute_ingestion_job(job_doc: Dict[str, Any]) -> Dict[str, Any]:
         return job_doc
 
     now = datetime.utcnow()
-    await db[COLLECTIONS['ingestion_jobs']].update_one(
-        {"job_key": job_doc["job_key"]},
-        {
-            "$set": {
-                "status": IngestionJobStatus.RUNNING.value,
-                "last_run_at": now,
-                "updated_at": now
-            },
-            "$inc": {"attempts": 1}
-        }
-    )
+    await update_ingestion_job(job_key, {
+        "status": IngestionJobStatus.RUNNING.value,
+        "last_run_at": now.isoformat(),
+        "attempts": job_doc.get("attempts", 0) + 1
+    })
 
     try:
         completed_at = datetime.utcnow()
-        await db[COLLECTIONS['ingestion_jobs']].update_one(
-            {"job_key": job_doc["job_key"]},
-            {
-                "$set": {
-                    "status": IngestionJobStatus.SUCCESS.value,
-                    "last_success_at": completed_at,
-                    "checkpoint": completed_at,
-                    "last_error": None,
-                    "updated_at": completed_at
-                }
-            }
-        )
+        await update_ingestion_job(job_key, {
+            "status": IngestionJobStatus.SUCCESS.value,
+            "last_success_at": completed_at.isoformat(),
+            "checkpoint": completed_at.isoformat(),
+            "last_error": None
+        })
     except Exception as exc:
-        await db[COLLECTIONS['ingestion_jobs']].update_one(
-            {"job_key": job_doc["job_key"]},
-            {
-                "$set": {
-                    "status": IngestionJobStatus.FAILED.value,
-                    "last_error": str(exc),
-                    "updated_at": datetime.utcnow()
-                }
-            }
-        )
+        await update_ingestion_job(job_key, {
+            "status": IngestionJobStatus.FAILED.value,
+            "last_error": str(exc)
+        })
         raise
 
-    return await db[COLLECTIONS['ingestion_jobs']].find_one({"job_key": job_doc["job_key"]}, {"_id": 0})
+    return await get_ingestion_job(job_key)
 
 async def latest_refresh_checkpoint(source: IngestionSource, project_id: Optional[str] = None) -> Optional[datetime]:
-    query: Dict[str, Any] = {
-        "job_type": IngestionJobType.REFRESH.value,
-        "payload.source": source.value,
-        "checkpoint": {"$ne": None}
-    }
-    if project_id:
-        query["payload.project_id"] = project_id
-    job = await db[COLLECTIONS['ingestion_jobs']].find_one(
-        query,
-        sort=[("checkpoint", -1)],
-        projection={"_id": 0, "checkpoint": 1}
-    )
-    return job["checkpoint"] if job else None
+    return await find_latest_ingestion_checkpoint(IngestionJobType.REFRESH.value, source.value, project_id)
 
 async def run_scheduled_refreshes():
     for source in IngestionSource:
@@ -298,8 +237,9 @@ async def get_work_items(project_id: str = None):
     query = {}
     if project_id:
         query['project_id'] = project_id
-    
-    items = await db[COLLECTIONS['work_items']].find(query, {"_id": 0}).to_list(1000)
+
+    cursor = await db[COLLECTIONS['work_items']].find(query, {"_id": 0})
+    items = await cursor.to_list(1000)
     return items
 
 @api_router.get("/work-items/{item_id}", response_model=WorkItem)
@@ -320,8 +260,9 @@ async def get_pull_requests(repo: str = None):
     query = {}
     if repo:
         query['repo'] = repo
-    
-    prs = await db[COLLECTIONS['pull_requests']].find(query, {"_id": 0}).to_list(1000)
+
+    cursor = await db[COLLECTIONS['pull_requests']].find(query, {"_id": 0})
+    prs = await cursor.to_list(1000)
     return prs
 
 @api_router.get("/pull-requests/{pr_id}", response_model=PullRequest)
@@ -342,8 +283,9 @@ async def get_conversations(channel: str = None):
     query = {}
     if channel:
         query['channel'] = channel
-    
-    conversations = await db[COLLECTIONS['conversations']].find(query, {"_id": 0}).to_list(1000)
+
+    cursor = await db[COLLECTIONS['conversations']].find(query, {"_id": 0})
+    conversations = await cursor.to_list(1000)
     return conversations
 
 # ===================
@@ -363,7 +305,8 @@ async def generate_scopedoc(project_id: str, project_name: str):
 @api_router.get("/scopedocs", response_model=List[ScopeDoc])
 async def get_scopedocs():
     """Get all ScopeDocs"""
-    docs = await db[COLLECTIONS['scopedocs']].find({}, {"_id": 0}).to_list(1000)
+    cursor = await db[COLLECTIONS['scopedocs']].find({}, {"_id": 0})
+    docs = await cursor.to_list(1000)
     return docs
 
 @api_router.get("/scopedocs/{doc_id}", response_model=ScopeDoc)
@@ -390,8 +333,9 @@ async def check_doc_freshness(doc_id: str):
 @api_router.post("/freshness/check-all")
 async def check_all_docs_freshness():
     """Check freshness of all docs"""
-    docs = await db[COLLECTIONS['scopedocs']].find({}, {"_id": 0}).to_list(1000)
-    
+    cursor = await db[COLLECTIONS['scopedocs']].find({}, {"_id": 0})
+    docs = await cursor.to_list(1000)
+
     results = []
     for doc_data in docs:
         doc = ScopeDoc(**doc_data)
@@ -402,7 +346,7 @@ async def check_all_docs_freshness():
             'freshness_score': round(freshness_score, 2),
             'freshness_level': doc.freshness_level
         })
-    
+
     return {'docs': results}
 
 @api_router.post("/drift-alerts")
@@ -418,7 +362,8 @@ async def create_drift_alert(doc_id: str, trigger_pr_id: str):
 @api_router.get("/drift-alerts", response_model=List[DocDriftAlert])
 async def get_drift_alerts():
     """Get all drift alerts"""
-    alerts = await db[COLLECTIONS['drift_alerts']].find({}, {"_id": 0}).to_list(1000)
+    cursor = await db[COLLECTIONS['drift_alerts']].find({}, {"_id": 0})
+    alerts = await cursor.to_list(1000)
     return alerts
 
 # ===================
@@ -431,7 +376,7 @@ async def generate_all_embeddings():
     try:
         # Clear existing embeddings
         await db[COLLECTIONS['embeddings']].delete_many({})
-        
+
         result = await rag_service.embed_all_artifacts()
         return result
     except Exception as e:
@@ -480,13 +425,15 @@ async def get_ownership_summary():
 @api_router.get("/components", response_model=List[Component])
 async def get_components():
     """Get all components"""
-    components = await db[COLLECTIONS['components']].find({}, {"_id": 0}).to_list(1000)
+    cursor = await db[COLLECTIONS['components']].find({}, {"_id": 0})
+    components = await cursor.to_list(1000)
     return components
 
 @api_router.get("/people", response_model=List[Person])
 async def get_people():
     """Get all people"""
-    people = await db[COLLECTIONS['people']].find({}, {"_id": 0}).to_list(1000)
+    cursor = await db[COLLECTIONS['people']].find({}, {"_id": 0})
+    people = await cursor.to_list(1000)
     return people
 
 # ===================
@@ -496,7 +443,8 @@ async def get_people():
 @api_router.get("/relationships", response_model=List[Relationship])
 async def get_relationships():
     """Get all relationships"""
-    relationships = await db[COLLECTIONS['relationships']].find({}, {"_id": 0}).to_list(1000)
+    cursor = await db[COLLECTIONS['relationships']].find({}, {"_id": 0})
+    relationships = await cursor.to_list(1000)
     return relationships
 
 # ===================
@@ -506,8 +454,9 @@ async def get_relationships():
 @api_router.get("/projects")
 async def get_projects():
     """Get all unique projects from work items"""
-    work_items = await db[COLLECTIONS['work_items']].find({}, {"_id": 0}).to_list(1000)
-    
+    cursor = await db[COLLECTIONS['work_items']].find({}, {"_id": 0})
+    work_items = await cursor.to_list(1000)
+
     projects_map = {}
     for item in work_items:
         project_id = item.get('project_id')
@@ -522,10 +471,10 @@ async def get_projects():
                     'team': project_info['team'],
                     'work_items_count': 0
                 }
-        
+
         if project_id and project_id in projects_map:
             projects_map[project_id]['work_items_count'] += 1
-    
+
     return {'projects': list(projects_map.values())}
 
 # ===================
@@ -546,7 +495,7 @@ async def get_stats():
         'embeddings': await db[COLLECTIONS['embeddings']].count_documents({}),
         'drift_alerts': await db[COLLECTIONS['drift_alerts']].count_documents({})
     }
-    
+
     return stats
 
 # Include the router in the main app
@@ -573,12 +522,10 @@ logger = logging.getLogger(__name__)
 @app.on_event("startup")
 async def startup_db():
     await init_db()
-    await init_pg()
-    logger.info("Database initialized")
+    logger.info("PostgreSQL database initialized")
 
 @app.on_event("shutdown")
 async def shutdown_db():
     scheduler.shutdown()
     await close_db()
-    await close_pool()
     logger.info("Database connection closed")

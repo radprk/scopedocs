@@ -5,27 +5,21 @@ import json
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-from models import IntegrationToken
-from database import db, COLLECTIONS
+from backend.models import IntegrationToken
+from backend.storage.postgres import (
+    upsert_integration_token,
+    get_integration_token as pg_get_integration_token,
+)
 
 
 async def store_integration_token(token: IntegrationToken) -> None:
-    """Store or update an integration token in MongoDB."""
-    await db[COLLECTIONS['integration_tokens']].update_one(
-        {
-            'integration': token.integration,
-            'workspace_id': token.workspace_id,
-        },
-        {'$set': token.model_dump()},
-        upsert=True,
-    )
+    """Store or update an integration token in PostgreSQL."""
+    await upsert_integration_token(token.model_dump())
 
 
 async def get_integration_token(integration: str, workspace_id: str) -> Optional[IntegrationToken]:
-    record = await db[COLLECTIONS['integration_tokens']].find_one(
-        {'integration': integration, 'workspace_id': workspace_id},
-        {'_id': 0},
-    )
+    """Get an integration token from PostgreSQL."""
+    record = await pg_get_integration_token(integration, workspace_id)
     if record:
         return IntegrationToken(**record)
     return None

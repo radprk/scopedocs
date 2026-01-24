@@ -1,6 +1,6 @@
 from typing import Any, Dict, Iterable, List, Mapping
 
-from backend.database import COLLECTIONS, db
+from backend.database import COLLECTIONS
 from backend.storage.postgres import (
     upsert_artifact_event,
     upsert_component,
@@ -27,19 +27,6 @@ POSTGRES_UPSERTS = {
     COLLECTIONS["drift_alerts"]: upsert_drift_alert,
 }
 
-MONGO_UPSERT_KEYS = {
-    COLLECTIONS["work_items"]: "external_id",
-    COLLECTIONS["pull_requests"]: "external_id",
-    COLLECTIONS["conversations"]: "external_id",
-    COLLECTIONS["people"]: "external_id",
-    COLLECTIONS["components"]: "name",
-    COLLECTIONS["scopedocs"]: "id",
-    COLLECTIONS["relationships"]: "id",
-    COLLECTIONS["artifact_events"]: "id",
-    COLLECTIONS["embeddings"]: "id",
-    COLLECTIONS["drift_alerts"]: "id",
-}
-
 
 def _normalize_payload(payload: Any) -> Dict[str, Any]:
     if hasattr(payload, "model_dump"):
@@ -51,21 +38,11 @@ def _normalize_payload(payload: Any) -> Dict[str, Any]:
 
 async def ingest_records(
     records_by_collection: Mapping[str, Iterable[Any]],
-    *,
-    write_postgres: bool = True,
-    write_mongo: bool = True,
 ) -> None:
+    """Ingest records into PostgreSQL database"""
     for collection, records in records_by_collection.items():
         normalized: List[Dict[str, Any]] = [_normalize_payload(record) for record in records]
-        if write_postgres:
-            upsert_func = POSTGRES_UPSERTS.get(collection)
-            if upsert_func:
-                for record in normalized:
-                    await upsert_func(record)
-        if write_mongo:
-            key = MONGO_UPSERT_KEYS.get(collection)
-            if not key:
-                continue
+        upsert_func = POSTGRES_UPSERTS.get(collection)
+        if upsert_func:
             for record in normalized:
-                lookup = {key: record.get(key)}
-                await db[collection].update_one(lookup, {"$set": record}, upsert=True)
+                await upsert_func(record)
