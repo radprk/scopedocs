@@ -25,6 +25,22 @@ import asyncpg
 
 LINEAR_API_URL = "https://api.linear.app/graphql"
 
+
+def parse_supabase_dsn(dsn):
+    """Parse Supabase DSN into components (asyncpg struggles with the format)."""
+    import re
+    pattern = r'postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)'
+    match = re.match(pattern, dsn)
+    if not match:
+        raise ValueError(f"Invalid DSN format: {dsn}")
+    return {
+        'user': match.group(1),
+        'password': match.group(2),
+        'host': match.group(3),
+        'port': int(match.group(4)),
+        'database': match.group(5),
+    }
+
 # GraphQL query to fetch issues
 ISSUES_QUERY = """
 query Issues($first: Int!, $after: String) {
@@ -263,7 +279,8 @@ async def main():
         # Store in Supabase
         print("")
         print("💾 Storing in Supabase...")
-        conn = await asyncpg.connect(dsn)
+        db_config = parse_supabase_dsn(dsn)
+        conn = await asyncpg.connect(**db_config)
 
         stored = await store_issues(conn, issues)
         print(f"✅ Stored {stored} issues")

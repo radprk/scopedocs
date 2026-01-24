@@ -27,6 +27,21 @@ import asyncpg
 SLACK_API_URL = "https://slack.com/api"
 
 
+def parse_supabase_dsn(dsn):
+    """Parse Supabase DSN into components (asyncpg struggles with the format)."""
+    pattern = r'postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)'
+    match = re.match(pattern, dsn)
+    if not match:
+        raise ValueError(f"Invalid DSN format: {dsn}")
+    return {
+        'user': match.group(1),
+        'password': match.group(2),
+        'host': match.group(3),
+        'port': int(match.group(4)),
+        'database': match.group(5),
+    }
+
+
 def extract_issue_refs(text: str) -> List[str]:
     """Extract Linear issue references like ENG-123 from text."""
     if not text:
@@ -317,7 +332,8 @@ async def main():
             # Store in Supabase
             print("")
             print("💾 Storing in Supabase...")
-            conn = await asyncpg.connect(dsn)
+            db_config = parse_supabase_dsn(dsn)
+            conn = await asyncpg.connect(**db_config)
 
             stored = await store_messages(conn, messages, client, token)
             print(f"✅ Stored {stored} message threads")

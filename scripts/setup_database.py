@@ -113,6 +113,23 @@ CREATE INDEX idx_slack_messages_fts ON slack_messages USING gin(to_tsvector('eng
 """
 
 
+def parse_supabase_dsn(dsn):
+    """Parse Supabase DSN into components (asyncpg struggles with the format)."""
+    import re
+    # postgresql://user:password@host:port/database
+    pattern = r'postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)'
+    match = re.match(pattern, dsn)
+    if not match:
+        raise ValueError(f"Invalid DSN format: {dsn}")
+    return {
+        'user': match.group(1),
+        'password': match.group(2),
+        'host': match.group(3),
+        'port': int(match.group(4)),
+        'database': match.group(5),
+    }
+
+
 async def setup_database():
     dsn = os.environ.get('POSTGRES_DSN') or os.environ.get('DATABASE_URL')
 
@@ -125,7 +142,9 @@ async def setup_database():
     print("")
 
     try:
-        conn = await asyncpg.connect(dsn)
+        # Parse DSN manually (asyncpg has issues with Supabase's format)
+        db_config = parse_supabase_dsn(dsn)
+        conn = await asyncpg.connect(**db_config)
 
         print("📡 Connected to Supabase")
         print("📝 Creating tables...")

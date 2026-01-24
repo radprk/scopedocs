@@ -19,9 +19,25 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import asyncpg
 import uvicorn
+import re
 
 # Database pool
 pool: Optional[asyncpg.Pool] = None
+
+
+def parse_supabase_dsn(dsn):
+    """Parse Supabase DSN into components (asyncpg struggles with the format)."""
+    pattern = r'postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)'
+    match = re.match(pattern, dsn)
+    if not match:
+        raise ValueError(f"Invalid DSN format: {dsn}")
+    return {
+        'user': match.group(1),
+        'password': match.group(2),
+        'host': match.group(3),
+        'port': int(match.group(4)),
+        'database': match.group(5),
+    }
 
 
 @asynccontextmanager
@@ -34,7 +50,8 @@ async def lifespan(app: FastAPI):
         sys.exit(1)
 
     print("📡 Connecting to Supabase...")
-    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=5)
+    db_config = parse_supabase_dsn(dsn)
+    pool = await asyncpg.create_pool(**db_config, min_size=1, max_size=5)
     print("✅ Connected!")
     yield
     await pool.close()
