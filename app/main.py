@@ -22,7 +22,11 @@ load_dotenv(Path(__file__).parent.parent / 'backend' / '.env')
 from fastapi import FastAPI, HTTPException, Depends, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
+
+# Security scheme for Swagger UI
+security = HTTPBearer()
 
 from .database import init_pool, close_pool, get_pool, run_migrations
 from .oauth import get_authorize_url, exchange_code_for_token, get_user_info
@@ -68,17 +72,13 @@ FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 # ============ SIMPLE AUTH (for MVP) ============
 # In production, validate Supabase JWT tokens
 
-async def get_current_user(request: Request) -> UUID:
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> UUID:
     """
     Get current user from Authorization header.
     For MVP: Pass user_id directly as Bearer token.
     For production: Validate Supabase JWT.
     """
-    auth = request.headers.get("Authorization", "")
-    if not auth.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing authorization")
-
-    token = auth.replace("Bearer ", "")
+    token = credentials.credentials
 
     # MVP: token is the user_id
     # Production: decode Supabase JWT and extract user_id
