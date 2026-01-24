@@ -1,516 +1,24 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+"""
+ScopeDocs API Server - Minimal MVP
+OAuth + Database + Sync workflows only
+"""
+from fastapi import FastAPI
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 import os
-import re
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
-import uuid
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
 
-# Import models and services
-from backend.models import (
-    WorkItem, PullRequest, Conversation, ScopeDoc, Component,
-    Person, Relationship, ChatRequest, ChatResponse, DocDriftAlert,
-    IngestionJobPayload, IngestionJob, IngestionJobType, IngestionJobStatus, IngestionSource
-)
-from backend.database import db, COLLECTIONS, init_db, close_db
-from backend.storage.postgres import (
-    get_pool,
-    close_pool,
-    init_pg,
-    get_ingestion_job,
-    update_ingestion_job,
-    find_latest_ingestion_checkpoint,
-)
-from backend.mock_data_generator import MockDataGenerator
-from backend.doc_service import DocGenerationService, FreshnessDetectionService
-from backend.rag_service import RAGService
-from backend.ownership_service import OwnershipService
-from backend.integrations.slack.routes import router as slack_router
-from backend.integrations.github.routes import router as github_router
-from backend.integrations.linear.routes import router as linear_router
-from backend.ingest.pipeline import ingest_records
+# Import routers
+from backend.sync.routes import router as sync_router
+from backend.integrations.oauth.routes import router as oauth_router
+from backend.storage.postgres import init_pg, close_pool
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 # Create the main app
 app = FastAPI(title="ScopeDocs API", version="1.0.0")
-
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
-
-# Initialize services
-doc_gen_service = DocGenerationService()
-freshness_service = FreshnessDetectionService()
-rag_service = RAGService()
-ownership_service = OwnershipService()
-mock_generator = MockDataGenerator()
-scheduler = AsyncIOScheduler(timezone="UTC")
-
-issue_ref_pattern = re.compile(r"\b([A-Z]{2,}-\d+)\b")
-
-
-def extract_issue_refs(text: str) -> List[str]:
-    return list({match.group(1) for match in issue_ref_pattern.finditer(text or "")})
-
-
-# ===================
-# MOCK DATA ENDPOINTS
-# ===================
-
-@api_router.post("/mock/generate-scenario")
-async def generate_mock_scenario():
-    """Generate a full mock scenario with all artifacts"""
-    scenario = mock_generator.generate_full_scenario()
-
-    await ingest_records(
-        {
-            COLLECTIONS['people']: scenario['people'],
-            COLLECTIONS['components']: scenario['components'],
-            COLLECTIONS['work_items']: [scenario['work_item']],
-            COLLECTIONS['pull_requests']: [scenario['pr']],
-            COLLECTIONS['conversations']: [scenario['conversation']],
-            COLLECTIONS['relationships']: scenario['relationships'],
-        }
-    )
-
-    return {
-        'message': 'Mock scenario generated successfully',
-        'project': scenario['project'],
-        'work_item_id': scenario['work_item'].external_id,
-        'pr_id': scenario['pr'].external_id,
-        'conversation_id': scenario['conversation'].external_id
-    }
-
-@api_router.post("/mock/generate-multiple")
-async def generate_multiple_scenarios(count: int = 5):
-    """Generate multiple mock scenarios"""
-    generated = []
-
-    for i in range(count):
-        scenario = mock_generator.generate_full_scenario()
-
-        records = {
-            COLLECTIONS['work_items']: [scenario['work_item']],
-            COLLECTIONS['pull_requests']: [scenario['pr']],
-            COLLECTIONS['conversations']: [scenario['conversation']],
-            COLLECTIONS['relationships']: scenario['relationships'],
-        }
-        if i == 0:
-            records[COLLECTIONS['people']] = scenario['people']
-            records[COLLECTIONS['components']] = scenario['components']
-
-        await ingest_records(records)
-
-        generated.append({
-            'project': scenario['project']['name'],
-            'work_item': scenario['work_item'].external_id
-        })
-
-    return {
-        'message': f'Generated {count} mock scenarios',
-        'scenarios': generated
-    }
-
-# ===================
-# INGESTION JOBS (Feature 5)
-# ===================
-
-def serialize_payload(payload: IngestionJobPayload) -> Dict[str, Any]:
-    return {
-        "source": payload.source.value,
-        "since": payload.since.isoformat() if payload.since else None,
-        "project_id": payload.project_id
-    }
-
-def build_job_key(job_type: IngestionJobType, payload: IngestionJobPayload) -> str:
-    project_key = payload.project_id or "all"
-    since_key = payload.since.isoformat() if payload.since else "none"
-    return f"{job_type.value}:{payload.source.value}:{project_key}:{since_key}"
-
-async def upsert_ingestion_job(
-    job_type: IngestionJobType,
-    payload: IngestionJobPayload
-) -> Dict[str, Any]:
-    job_key = build_job_key(job_type, payload)
-    now = datetime.utcnow()
-
-    # Check if job exists
-    existing = await get_ingestion_job(job_key)
-    if existing:
-        # Update existing job
-        await update_ingestion_job(job_key, {
-            "updated_at": now.isoformat()
-        })
-        return await get_ingestion_job(job_key)
-
-    # Create new job
-    job_doc = {
-        "id": str(uuid.uuid4()),
-        "job_key": job_key,
-        "job_type": job_type.value,
-        "payload": serialize_payload(payload),
-        "status": IngestionJobStatus.QUEUED.value,
-        "attempts": 0,
-        "created_at": now.isoformat(),
-        "updated_at": now.isoformat()
-    }
-
-    await db[COLLECTIONS['ingestion_jobs']].insert_one(job_doc)
-    return job_doc
-
-async def execute_ingestion_job(job_doc: Dict[str, Any]) -> Dict[str, Any]:
-    if not job_doc:
-        raise HTTPException(status_code=404, detail="Ingestion job not found")
-
-    job_key = job_doc.get("job_key")
-    checkpoint = job_doc.get("checkpoint")
-    payload_since = job_doc.get("payload", {}).get("since")
-
-    if (
-        job_doc.get("status") == IngestionJobStatus.SUCCESS.value
-        and checkpoint
-        and payload_since
-        and checkpoint >= payload_since
-    ):
-        return job_doc
-
-    now = datetime.utcnow()
-    await update_ingestion_job(job_key, {
-        "status": IngestionJobStatus.RUNNING.value,
-        "last_run_at": now.isoformat(),
-        "attempts": job_doc.get("attempts", 0) + 1
-    })
-
-    try:
-        completed_at = datetime.utcnow()
-        await update_ingestion_job(job_key, {
-            "status": IngestionJobStatus.SUCCESS.value,
-            "last_success_at": completed_at.isoformat(),
-            "checkpoint": completed_at.isoformat(),
-            "last_error": None
-        })
-    except Exception as exc:
-        await update_ingestion_job(job_key, {
-            "status": IngestionJobStatus.FAILED.value,
-            "last_error": str(exc)
-        })
-        raise
-
-    return await get_ingestion_job(job_key)
-
-async def latest_refresh_checkpoint(source: IngestionSource, project_id: Optional[str] = None) -> Optional[datetime]:
-    return await find_latest_ingestion_checkpoint(IngestionJobType.REFRESH.value, source.value, project_id)
-
-async def run_scheduled_refreshes():
-    for source in IngestionSource:
-        last_checkpoint = await latest_refresh_checkpoint(source)
-        since = last_checkpoint or (datetime.utcnow() - timedelta(days=1))
-        payload = IngestionJobPayload(source=source, since=since)
-        job_doc = await upsert_ingestion_job(IngestionJobType.REFRESH, payload)
-        await execute_ingestion_job(job_doc)
-
-@api_router.post("/ingest/refresh", response_model=IngestionJob)
-async def refresh_ingestion(payload: IngestionJobPayload):
-    """Queue and run a refresh ingestion job."""
-    job_doc = await upsert_ingestion_job(IngestionJobType.REFRESH, payload)
-    return await execute_ingestion_job(job_doc)
-
-@api_router.post("/ingest/backfill", response_model=IngestionJob)
-async def backfill_ingestion(payload: IngestionJobPayload):
-    """Queue and run a backfill ingestion job."""
-    job_doc = await upsert_ingestion_job(IngestionJobType.BACKFILL, payload)
-    return await execute_ingestion_job(job_doc)
-
-# ===================
-# WORK ITEMS
-# ===================
-
-@api_router.get("/work-items", response_model=List[WorkItem])
-async def get_work_items(project_id: str = None):
-    """Get all work items, optionally filtered by project"""
-    query = {}
-    if project_id:
-        query['project_id'] = project_id
-
-    cursor = await db[COLLECTIONS['work_items']].find(query, {"_id": 0})
-    items = await cursor.to_list(1000)
-    return items
-
-@api_router.get("/work-items/{item_id}", response_model=WorkItem)
-async def get_work_item(item_id: str):
-    """Get a specific work item"""
-    item = await db[COLLECTIONS['work_items']].find_one({'id': item_id}, {"_id": 0})
-    if not item:
-        raise HTTPException(status_code=404, detail="Work item not found")
-    return item
-
-# ===================
-# PULL REQUESTS
-# ===================
-
-@api_router.get("/pull-requests", response_model=List[PullRequest])
-async def get_pull_requests(repo: str = None):
-    """Get all pull requests, optionally filtered by repo"""
-    query = {}
-    if repo:
-        query['repo'] = repo
-
-    cursor = await db[COLLECTIONS['pull_requests']].find(query, {"_id": 0})
-    prs = await cursor.to_list(1000)
-    return prs
-
-@api_router.get("/pull-requests/{pr_id}", response_model=PullRequest)
-async def get_pull_request(pr_id: str):
-    """Get a specific pull request"""
-    pr = await db[COLLECTIONS['pull_requests']].find_one({'id': pr_id}, {"_id": 0})
-    if not pr:
-        raise HTTPException(status_code=404, detail="Pull request not found")
-    return pr
-
-# ===================
-# CONVERSATIONS
-# ===================
-
-@api_router.get("/conversations", response_model=List[Conversation])
-async def get_conversations(channel: str = None):
-    """Get all conversations, optionally filtered by channel"""
-    query = {}
-    if channel:
-        query['channel'] = channel
-
-    cursor = await db[COLLECTIONS['conversations']].find(query, {"_id": 0})
-    conversations = await cursor.to_list(1000)
-    return conversations
-
-# ===================
-# SCOPEDOCS (Feature 1)
-# ===================
-
-@api_router.post("/scopedocs/generate")
-async def generate_scopedoc(project_id: str, project_name: str):
-    """Generate a ScopeDoc from a Linear project"""
-    try:
-        doc = await doc_gen_service.generate_doc_from_project(project_id, project_name)
-        await db[COLLECTIONS['scopedocs']].insert_one(doc.model_dump())
-        return {'message': 'Doc generated successfully', 'doc': doc}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@api_router.get("/scopedocs", response_model=List[ScopeDoc])
-async def get_scopedocs():
-    """Get all ScopeDocs"""
-    cursor = await db[COLLECTIONS['scopedocs']].find({}, {"_id": 0})
-    docs = await cursor.to_list(1000)
-    return docs
-
-@api_router.get("/scopedocs/{doc_id}", response_model=ScopeDoc)
-async def get_scopedoc(doc_id: str):
-    """Get a specific ScopeDoc"""
-    doc = await db[COLLECTIONS['scopedocs']].find_one({'id': doc_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="ScopeDoc not found")
-    return doc
-
-# ===================
-# DOC FRESHNESS (Feature 2)
-# ===================
-
-@api_router.get("/freshness/{doc_id}")
-async def check_doc_freshness(doc_id: str):
-    """Check freshness of a specific doc"""
-    try:
-        result = await freshness_service.detect_drift(doc_id)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@api_router.post("/freshness/check-all")
-async def check_all_docs_freshness():
-    """Check freshness of all docs"""
-    cursor = await db[COLLECTIONS['scopedocs']].find({}, {"_id": 0})
-    docs = await cursor.to_list(1000)
-
-    results = []
-    for doc_data in docs:
-        doc = ScopeDoc(**doc_data)
-        freshness_score = await freshness_service.calculate_freshness_score(doc)
-        results.append({
-            'doc_id': doc.id,
-            'project_name': doc.project_name,
-            'freshness_score': round(freshness_score, 2),
-            'freshness_level': doc.freshness_level
-        })
-
-    return {'docs': results}
-
-@api_router.post("/drift-alerts")
-async def create_drift_alert(doc_id: str, trigger_pr_id: str):
-    """Create a drift alert"""
-    try:
-        alert = await freshness_service.create_drift_alert(doc_id, trigger_pr_id)
-        await db[COLLECTIONS['drift_alerts']].insert_one(alert.model_dump())
-        return {'message': 'Alert created', 'alert': alert}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@api_router.get("/drift-alerts", response_model=List[DocDriftAlert])
-async def get_drift_alerts():
-    """Get all drift alerts"""
-    cursor = await db[COLLECTIONS['drift_alerts']].find({}, {"_id": 0})
-    alerts = await cursor.to_list(1000)
-    return alerts
-
-# ===================
-# ASK SCOPEY RAG (Feature 3)
-# ===================
-
-@api_router.post("/embeddings/generate-all")
-async def generate_all_embeddings():
-    """Generate embeddings for all artifacts"""
-    try:
-        # Clear existing embeddings
-        await db[COLLECTIONS['embeddings']].delete_many({})
-
-        result = await rag_service.embed_all_artifacts()
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@api_router.post("/ask-scopey", response_model=ChatResponse)
-async def ask_scopey(request: ChatRequest):
-    """Ask Scopey a question using RAG"""
-    try:
-        response = await rag_service.ask_scopey(request)
-        return response
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@api_router.get("/search")
-async def semantic_search(query: str, top_k: int = 5):
-    """Semantic search across all artifacts"""
-    try:
-        results = await rag_service.semantic_search(query, top_k)
-        return {'results': results}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# ===================
-# OWNERSHIP (Feature 4)
-# ===================
-
-@api_router.get("/ownership/{component_id}")
-async def get_component_ownership(component_id: str):
-    """Get ownership info for a component"""
-    try:
-        result = await ownership_service.resolve_ownership(component_id)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@api_router.get("/ownership")
-async def get_ownership_summary():
-    """Get overall ownership summary"""
-    try:
-        result = await ownership_service.get_ownership_summary()
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@api_router.get("/components", response_model=List[Component])
-async def get_components():
-    """Get all components"""
-    cursor = await db[COLLECTIONS['components']].find({}, {"_id": 0})
-    components = await cursor.to_list(1000)
-    return components
-
-@api_router.get("/people", response_model=List[Person])
-async def get_people():
-    """Get all people"""
-    cursor = await db[COLLECTIONS['people']].find({}, {"_id": 0})
-    people = await cursor.to_list(1000)
-    return people
-
-# ===================
-# RELATIONSHIPS
-# ===================
-
-@api_router.get("/relationships", response_model=List[Relationship])
-async def get_relationships():
-    """Get all relationships"""
-    cursor = await db[COLLECTIONS['relationships']].find({}, {"_id": 0})
-    relationships = await cursor.to_list(1000)
-    return relationships
-
-# ===================
-# PROJECTS
-# ===================
-
-@api_router.get("/projects")
-async def get_projects():
-    """Get all unique projects from work items"""
-    cursor = await db[COLLECTIONS['work_items']].find({}, {"_id": 0})
-    work_items = await cursor.to_list(1000)
-
-    projects_map = {}
-    for item in work_items:
-        project_id = item.get('project_id')
-        if project_id and project_id not in projects_map:
-            # Get project info from mock data
-            from backend.mock_data_generator import PROJECTS
-            project_info = next((p for p in PROJECTS if p['id'] == project_id), None)
-            if project_info:
-                projects_map[project_id] = {
-                    'id': project_id,
-                    'name': project_info['name'],
-                    'team': project_info['team'],
-                    'work_items_count': 0
-                }
-
-        if project_id and project_id in projects_map:
-            projects_map[project_id]['work_items_count'] += 1
-
-    return {'projects': list(projects_map.values())}
-
-# ===================
-# STATS & DASHBOARD
-# ===================
-
-@api_router.get("/stats")
-async def get_stats():
-    """Get overall statistics"""
-    stats = {
-        'work_items': await db[COLLECTIONS['work_items']].count_documents({}),
-        'pull_requests': await db[COLLECTIONS['pull_requests']].count_documents({}),
-        'conversations': await db[COLLECTIONS['conversations']].count_documents({}),
-        'scopedocs': await db[COLLECTIONS['scopedocs']].count_documents({}),
-        'components': await db[COLLECTIONS['components']].count_documents({}),
-        'people': await db[COLLECTIONS['people']].count_documents({}),
-        'relationships': await db[COLLECTIONS['relationships']].count_documents({}),
-        'embeddings': await db[COLLECTIONS['embeddings']].count_documents({}),
-        'drift_alerts': await db[COLLECTIONS['drift_alerts']].count_documents({})
-    }
-
-    return stats
-
-# Include the router in the main app
-app.include_router(api_router)
-app.include_router(slack_router)
-app.include_router(github_router)
-app.include_router(linear_router)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # Configure logging
 logging.basicConfig(
@@ -519,13 +27,50 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Include routers
+app.include_router(sync_router)
+app.include_router(oauth_router)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/")
+async def root():
+    return {
+        "name": "ScopeDocs API",
+        "version": "1.0.0",
+        "status": "running",
+        "endpoints": {
+            "oauth": "/api/oauth/{provider}/connect",
+            "sync": "/api/sync/{integration}",
+            "health": "/health"
+        }
+    }
+
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
+
+
 @app.on_event("startup")
-async def startup_db():
-    await init_db()
-    logger.info("PostgreSQL database initialized")
+async def startup():
+    try:
+        await init_pg()
+        logger.info("PostgreSQL database initialized")
+    except Exception as e:
+        logger.warning(f"Database not available: {e}")
+        logger.info("Running without database - OAuth testing still works")
+
 
 @app.on_event("shutdown")
-async def shutdown_db():
-    scheduler.shutdown()
-    await close_db()
+async def shutdown():
+    await close_pool()
     logger.info("Database connection closed")
