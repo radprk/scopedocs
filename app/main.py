@@ -9,6 +9,7 @@ Features:
 """
 import os
 import sys
+import json
 import secrets
 from pathlib import Path
 from datetime import datetime
@@ -21,8 +22,9 @@ load_dotenv(Path(__file__).parent.parent / 'backend' / '.env')
 
 from fastapi import FastAPI, HTTPException, Depends, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 # Security scheme for Swagger UI
@@ -66,7 +68,7 @@ app.add_middleware(
 oauth_states = {}
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000")
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+FRONTEND_URL = os.environ.get("FRONTEND_URL", BASE_URL)  # Default to same origin
 
 
 # ============ SIMPLE AUTH (for MVP) ============
@@ -165,30 +167,39 @@ async def oauth_authorize(provider: str, user_id: UUID = Depends(get_current_use
 @app.get("/oauth/{provider}/callback", tags=["OAuth"])
 async def oauth_callback(provider: str, code: str, state: str):
     """OAuth callback - exchange code for token."""
+    print(f"[OAuth] Callback received for {provider}, state={state[:20]}...")
+
     if state not in oauth_states:
-        raise HTTPException(status_code=400, detail="Invalid state")
+        print(f"[OAuth] ERROR: Invalid state. Known states: {list(oauth_states.keys())}")
+        return RedirectResponse(f"{FRONTEND_URL}/?error=invalid_state")
 
     state_data = oauth_states.pop(state)
     user_id = UUID(state_data['user_id'])
+    print(f"[OAuth] Processing for user {user_id}")
 
     redirect_uri = f"{BASE_URL}/oauth/{provider}/callback"
 
     try:
         # Exchange code for token
+        print(f"[OAuth] Exchanging code for token...")
         token_data = await exchange_code_for_token(provider, code, redirect_uri)
+        print(f"[OAuth] Token response keys: {token_data.keys() if isinstance(token_data, dict) else 'not a dict'}")
 
         access_token = token_data.get('access_token')
         if not access_token:
             raise Exception(f"No access token in response: {token_data}")
 
         # Get workspace info
+        print(f"[OAuth] Getting workspace info...")
         workspace_info = await get_user_info(provider, access_token)
+        print(f"[OAuth] Workspace info: {workspace_info}")
 
         # Store token
+        print(f"[OAuth] Storing token in database...")
         async with get_pool().acquire() as conn:
             await conn.execute("""
                 INSERT INTO user_integrations (user_id, provider, access_token, refresh_token, workspace_info)
-                VALUES ($1, $2, $3, $4, $5)
+                VALUES ($1, $2, $3, $4, $5::jsonb)
                 ON CONFLICT (user_id, provider) DO UPDATE SET
                     access_token = EXCLUDED.access_token,
                     refresh_token = EXCLUDED.refresh_token,
@@ -197,14 +208,18 @@ async def oauth_callback(provider: str, code: str, state: str):
             """,
                 user_id, provider, access_token,
                 token_data.get('refresh_token'),
-                workspace_info
+                json.dumps(workspace_info)
             )
 
+        print(f"[OAuth] SUCCESS! Redirecting to frontend...")
         # Redirect to frontend
-        return RedirectResponse(f"{FRONTEND_URL}/settings?connected={provider}")
+        return RedirectResponse(f"{FRONTEND_URL}/?connected={provider}")
 
     except Exception as e:
-        return RedirectResponse(f"{FRONTEND_URL}/settings?error={str(e)}")
+        print(f"[OAuth] ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return RedirectResponse(f"{FRONTEND_URL}/?error={str(e)}")
 
 
 # ============ SYNC ENDPOINTS ============
@@ -405,11 +420,23 @@ async def health_check():
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
 
+# ============ FRONTEND ============
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def serve_frontend():
+    """Serve the frontend."""
+    static_path = Path(__file__).parent / "static" / "index.html"
+    if static_path.exists():
+        return FileResponse(static_path)
+    return HTMLResponse("<h1>ScopeDocs API</h1><p>Go to <a href='/docs'>/docs</a> for API documentation.</p>")
+
+
 # ============ RUN ============
 
 if __name__ == '__main__':
     print("")
     print("🚀 Starting ScopeDocs...")
+    print("   Frontend: http://localhost:8000")
     print("   API docs: http://localhost:8000/docs")
     print("")
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

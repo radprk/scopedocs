@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ScopeDocs</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f0f; color: #e0e0e0; min-height: 100vh; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { color: #fff; margin-bottom: 10px; }
+        .subtitle { color: #888; margin-bottom: 30px; }
+        .card { background: #1a1a1a; border-radius: 12px; padding: 24px; margin-bottom: 20px; border: 1px solid #333; }
+        .card h2 { color: #fff; margin-bottom: 16px; font-size: 18px; }
+        .form-group { margin-bottom: 16px; }
+        label { display: block; margin-bottom: 6px; color: #aaa; font-size: 14px; }
+        input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #333; background: #0f0f0f; color: #fff; font-size: 14px; }
+        input:focus { outline: none; border-color: #4f8cff; }
+        button { padding: 12px 24px; border-radius: 8px; border: none; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s; }
+        .btn-primary { background: #4f8cff; color: #fff; }
+        .btn-primary:hover { background: #3d7ae8; }
+        .btn-secondary { background: #333; color: #fff; margin-right: 10px; }
+        .btn-secondary:hover { background: #444; }
+        .btn-success { background: #22c55e; color: #fff; }
+        .integrations { display: flex; gap: 12px; flex-wrap: wrap; }
+        .integration-btn { display: flex; align-items: center; gap: 8px; padding: 12px 20px; }
+        .integration-btn.connected { background: #22c55e; }
+        .status { padding: 8px 16px; border-radius: 6px; font-size: 13px; margin-top: 12px; }
+        .status.success { background: #22c55e20; color: #22c55e; }
+        .status.error { background: #ef444420; color: #ef4444; }
+        .status.info { background: #4f8cff20; color: #4f8cff; }
+        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+        .stat { background: #252525; padding: 20px; border-radius: 8px; text-align: center; }
+        .stat-value { font-size: 32px; font-weight: 700; color: #fff; }
+        .stat-label { font-size: 12px; color: #888; margin-top: 4px; }
+        .issues-list { max-height: 400px; overflow-y: auto; }
+        .issue { padding: 16px; background: #252525; border-radius: 8px; margin-bottom: 8px; cursor: pointer; transition: all 0.2s; }
+        .issue:hover { background: #303030; }
+        .issue-id { color: #4f8cff; font-weight: 600; }
+        .issue-title { color: #fff; margin-top: 4px; }
+        .issue-meta { color: #666; font-size: 12px; margin-top: 8px; }
+        .context-panel { background: #252525; border-radius: 8px; padding: 20px; margin-top: 16px; }
+        .context-section { margin-bottom: 20px; }
+        .context-section h3 { color: #888; font-size: 12px; text-transform: uppercase; margin-bottom: 12px; }
+        .pr-item, .slack-item { background: #1a1a1a; padding: 12px; border-radius: 6px; margin-bottom: 8px; }
+        .hidden { display: none; }
+        .loading { opacity: 0.5; pointer-events: none; }
+        #app-logged-out, #app-logged-in { transition: all 0.3s; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ScopeDocs</h1>
+        <p class="subtitle">Get full context on any ticket</p>
+
+        <!-- Logged Out State -->
+        <div id="app-logged-out">
+            <div class="card">
+                <h2>Get Started</h2>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="signup-email" placeholder="you@company.com">
+                </div>
+                <div class="form-group">
+                    <label>Name</label>
+                    <input type="text" id="signup-name" placeholder="Your name">
+                </div>
+                <button class="btn-primary" onclick="signup()">Sign Up / Login</button>
+                <div id="signup-status"></div>
+            </div>
+        </div>
+
+        <!-- Logged In State -->
+        <div id="app-logged-in" class="hidden">
+            <!-- User Info -->
+            <div class="card">
+                <h2>Welcome, <span id="user-name">User</span></h2>
+                <p style="color: #888; font-size: 14px;">User ID: <code id="user-id" style="color: #4f8cff;"></code></p>
+            </div>
+
+            <!-- Integrations -->
+            <div class="card">
+                <h2>Connect Your Tools</h2>
+                <div class="integrations">
+                    <button class="btn-secondary integration-btn" id="btn-linear" onclick="connectIntegration('linear')">
+                        <span>Linear</span>
+                    </button>
+                    <button class="btn-secondary integration-btn" id="btn-github" onclick="connectIntegration('github')">
+                        <span>GitHub</span>
+                    </button>
+                    <button class="btn-secondary integration-btn" id="btn-slack" onclick="connectIntegration('slack')">
+                        <span>Slack</span>
+                    </button>
+                </div>
+                <div id="integration-status"></div>
+            </div>
+
+            <!-- Sync -->
+            <div class="card">
+                <h2>Sync Data</h2>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button class="btn-secondary" onclick="syncProvider('linear')">Sync Linear</button>
+                    <button class="btn-secondary" onclick="syncProvider('github')">Sync GitHub</button>
+                    <button class="btn-secondary" onclick="syncProvider('slack')">Sync Slack</button>
+                </div>
+                <div class="form-group" style="margin-top: 16px;">
+                    <label>GitHub Repos (comma-separated)</label>
+                    <input type="text" id="github-repos" placeholder="owner/repo1, owner/repo2">
+                </div>
+                <div class="form-group">
+                    <label>Slack Channels (comma-separated)</label>
+                    <input type="text" id="slack-channels" placeholder="general, engineering">
+                </div>
+                <div id="sync-status"></div>
+            </div>
+
+            <!-- Stats -->
+            <div class="card">
+                <h2>Your Data</h2>
+                <div class="stats">
+                    <div class="stat">
+                        <div class="stat-value" id="stat-issues">0</div>
+                        <div class="stat-label">Linear Issues</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-value" id="stat-prs">0</div>
+                        <div class="stat-label">GitHub PRs</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-value" id="stat-messages">0</div>
+                        <div class="stat-label">Slack Messages</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-value" id="stat-links">0</div>
+                        <div class="stat-label">Links</div>
+                    </div>
+                </div>
+                <button class="btn-secondary" onclick="loadStats()">Refresh Stats</button>
+            </div>
+
+            <!-- Issues & Context -->
+            <div class="card">
+                <h2>Issues</h2>
+                <button class="btn-secondary" onclick="loadIssues()" style="margin-bottom: 16px;">Load Issues</button>
+                <div class="issues-list" id="issues-list"></div>
+
+                <div id="context-panel" class="context-panel hidden">
+                    <h2 id="context-title">Issue Context</h2>
+                    <p id="context-description" style="color: #aaa; margin: 12px 0;"></p>
+
+                    <div class="context-section">
+                        <h3>Linked Pull Requests</h3>
+                        <div id="context-prs"></div>
+                    </div>
+
+                    <div class="context-section">
+                        <h3>Slack Discussions</h3>
+                        <div id="context-slack"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API = '';  // Same origin
+        let token = localStorage.getItem('scopedocs_token');
+        let currentUser = null;
+
+        // Check if logged in on load
+        document.addEventListener('DOMContentLoaded', () => {
+            if (token) {
+                checkAuth();
+            }
+
+            // Check for OAuth callback
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('connected')) {
+                showStatus('integration-status', `Connected ${params.get('connected')}!`, 'success');
+                window.history.replaceState({}, '', '/');
+                checkAuth();
+            }
+            if (params.get('error')) {
+                showStatus('integration-status', `Error: ${params.get('error')}`, 'error');
+                window.history.replaceState({}, '', '/');
+            }
+        });
+
+        function showStatus(elementId, message, type) {
+            const el = document.getElementById(elementId);
+            el.innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+
+        async function api(endpoint, options = {}) {
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+
+            const res = await fetch(API + endpoint, { ...options, headers });
+            if (!res.ok) {
+                const err = await res.text();
+                throw new Error(err);
+            }
+            return res.json();
+        }
+
+        async function signup() {
+            const email = document.getElementById('signup-email').value;
+            const name = document.getElementById('signup-name').value;
+
+            if (!email) {
+                showStatus('signup-status', 'Please enter your email', 'error');
+                return;
+            }
+
+            try {
+                const data = await api(`/auth/signup?email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`, { method: 'POST' });
+                token = data.user_id;
+                localStorage.setItem('scopedocs_token', token);
+                showStatus('signup-status', 'Success! Logging you in...', 'success');
+                setTimeout(checkAuth, 500);
+            } catch (e) {
+                showStatus('signup-status', `Error: ${e.message}`, 'error');
+            }
+        }
+
+        async function checkAuth() {
+            try {
+                currentUser = await api('/auth/me');
+                document.getElementById('app-logged-out').classList.add('hidden');
+                document.getElementById('app-logged-in').classList.remove('hidden');
+                document.getElementById('user-name').textContent = currentUser.name || currentUser.email;
+                document.getElementById('user-id').textContent = currentUser.id;
+
+                // Update integration buttons
+                currentUser.integrations.forEach(i => {
+                    const btn = document.getElementById(`btn-${i.provider}`);
+                    if (btn) {
+                        btn.classList.add('connected');
+                        btn.textContent = `✓ ${i.provider}`;
+                    }
+                });
+
+                loadStats();
+            } catch (e) {
+                token = null;
+                localStorage.removeItem('scopedocs_token');
+                document.getElementById('app-logged-out').classList.remove('hidden');
+                document.getElementById('app-logged-in').classList.add('hidden');
+            }
+        }
+
+        async function connectIntegration(provider) {
+            try {
+                const data = await api(`/oauth/${provider}/authorize`);
+                window.location.href = data.authorize_url;
+            } catch (e) {
+                showStatus('integration-status', `Error: ${e.message}`, 'error');
+            }
+        }
+
+        async function syncProvider(provider) {
+            const repos = document.getElementById('github-repos').value;
+            const channels = document.getElementById('slack-channels').value;
+
+            let url = `/sync/${provider}`;
+            const params = [];
+            if (provider === 'github' && repos) params.push(`repos=${encodeURIComponent(repos)}`);
+            if (provider === 'slack' && channels) params.push(`channels=${encodeURIComponent(channels)}`);
+            if (params.length) url += '?' + params.join('&');
+
+            showStatus('sync-status', `Syncing ${provider}...`, 'info');
+
+            try {
+                const data = await api(url, { method: 'POST' });
+                showStatus('sync-status', `Synced! ${JSON.stringify(data)}`, 'success');
+                loadStats();
+            } catch (e) {
+                showStatus('sync-status', `Error: ${e.message}`, 'error');
+            }
+        }
+
+        async function loadStats() {
+            try {
+                const stats = await api('/stats');
+                document.getElementById('stat-issues').textContent = stats.linear_issues || 0;
+                document.getElementById('stat-prs').textContent = stats.github_prs || 0;
+                document.getElementById('stat-messages').textContent = stats.slack_messages || 0;
+                document.getElementById('stat-links').textContent = stats.links || 0;
+            } catch (e) {
+                console.error('Failed to load stats', e);
+            }
+        }
+
+        async function loadIssues() {
+            try {
+                const issues = await api('/issues');
+                const list = document.getElementById('issues-list');
+
+                if (issues.length === 0) {
+                    list.innerHTML = '<p style="color: #666;">No issues yet. Connect Linear and sync first.</p>';
+                    return;
+                }
+
+                list.innerHTML = issues.map(i => `
+                    <div class="issue" onclick="loadContext('${i.identifier}')">
+                        <span class="issue-id">${i.identifier}</span>
+                        <div class="issue-title">${i.title}</div>
+                        <div class="issue-meta">${i.status || 'No status'} • ${i.team_name || 'No team'}</div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                showStatus('issues-list', `Error: ${e.message}`, 'error');
+            }
+        }
+
+        async function loadContext(issueId) {
+            try {
+                const ctx = await api(`/context/${issueId}`);
+                const panel = document.getElementById('context-panel');
+                panel.classList.remove('hidden');
+
+                document.getElementById('context-title').textContent = `${ctx.issue.identifier}: ${ctx.issue.title}`;
+                document.getElementById('context-description').textContent = ctx.issue.description || 'No description';
+
+                const prsEl = document.getElementById('context-prs');
+                if (ctx.prs.length === 0) {
+                    prsEl.innerHTML = '<p style="color: #666;">No linked PRs</p>';
+                } else {
+                    prsEl.innerHTML = ctx.prs.map(pr => `
+                        <div class="pr-item">
+                            <strong>${pr.repo}#${pr.number}</strong>: ${pr.title}
+                            <div style="color: #888; font-size: 12px;">${pr.state} by ${pr.author}</div>
+                        </div>
+                    `).join('');
+                }
+
+                const slackEl = document.getElementById('context-slack');
+                if (ctx.discussions.length === 0) {
+                    slackEl.innerHTML = '<p style="color: #666;">No linked Slack discussions</p>';
+                } else {
+                    slackEl.innerHTML = ctx.discussions.map(msg => `
+                        <div class="slack-item">
+                            <strong>#${msg.channel}</strong>
+                            <p style="margin-top: 4px;">${msg.text || 'No text'}</p>
+                        </div>
+                    `).join('');
+                }
+
+                panel.scrollIntoView({ behavior: 'smooth' });
+            } catch (e) {
+                console.error('Failed to load context', e);
+            }
+        }
+    </script>
+</body>
+</html>
