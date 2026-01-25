@@ -161,6 +161,19 @@ async def oauth_authorize(provider: str, user_id: UUID = Depends(get_current_use
     redirect_uri = f"{BASE_URL}/oauth/{provider}/callback"
     authorize_url = get_authorize_url(provider, redirect_uri, state)
 
+    # Debug: show what URL we're generating
+    print(f"[OAuth] {provider.upper()} authorize:")
+    print(f"        Redirect URI: {redirect_uri}")
+    print(f"        Authorize URL: {authorize_url[:120]}...")
+
+    # Check if client_id is missing
+    if 'client_id=None' in authorize_url or 'client_id=&' in authorize_url:
+        print(f"[OAuth] WARNING: {provider.upper()}_CLIENT_ID is not set in .env!")
+        raise HTTPException(
+            status_code=500,
+            detail=f"{provider.upper()}_CLIENT_ID not configured. Add it to backend/.env"
+        )
+
     return {"authorize_url": authorize_url}
 
 
