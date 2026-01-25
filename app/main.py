@@ -25,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
+import httpx
 import uvicorn
 
 # Security scheme for Swagger UI
@@ -295,6 +296,62 @@ async def trigger_sync(
         results['links_created'] = links
 
         return results
+
+
+# ============ INTEGRATION DATA ENDPOINTS ============
+
+@app.get("/integrations/github/repos", tags=["Integrations"])
+async def get_github_repos(user_id: UUID = Depends(get_current_user)):
+    """Fetch list of repos the user has access to."""
+    async with get_pool().acquire() as conn:
+        integration = await conn.fetchrow(
+            "SELECT access_token, workspace_info FROM user_integrations WHERE user_id = $1 AND provider = 'github'",
+            user_id
+        )
+        if not integration:
+            raise HTTPException(status_code=400, detail="GitHub not connected")
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(
+                "https://api.github.com/user/repos",
+                headers={"Authorization": f"Bearer {integration['access_token']}", "Accept": "application/vnd.github.v3+json"},
+                params={"sort": "updated", "per_page": 100}
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=500, detail=f"GitHub API error: {response.status_code}")
+
+            repos = response.json()
+            return {
+                "account": json.loads(integration['workspace_info']) if integration['workspace_info'] else {},
+                "repos": [{"full_name": r["full_name"], "private": r["private"], "updated_at": r["updated_at"]} for r in repos]
+            }
+
+
+@app.get("/integrations/slack/channels", tags=["Integrations"])
+async def get_slack_channels(user_id: UUID = Depends(get_current_user)):
+    """Fetch list of Slack channels the user has access to."""
+    async with get_pool().acquire() as conn:
+        integration = await conn.fetchrow(
+            "SELECT access_token, workspace_info FROM user_integrations WHERE user_id = $1 AND provider = 'slack'",
+            user_id
+        )
+        if not integration:
+            raise HTTPException(status_code=400, detail="Slack not connected")
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(
+                "https://slack.com/api/conversations.list",
+                headers={"Authorization": f"Bearer {integration['access_token']}"},
+                params={"types": "public_channel,private_channel", "limit": 200}
+            )
+            data = response.json()
+            if not data.get("ok"):
+                raise HTTPException(status_code=500, detail=f"Slack API error: {data.get('error')}")
+
+            return {
+                "account": json.loads(integration['workspace_info']) if integration['workspace_info'] else {},
+                "channels": [{"name": c["name"], "id": c["id"], "is_private": c.get("is_private", False)} for c in data.get("channels", [])]
+            }
 
 
 # ============ QUERY ENDPOINTS ============

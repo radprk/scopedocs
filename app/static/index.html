@@ -14,7 +14,7 @@
         .card h2 { color: #fff; margin-bottom: 16px; font-size: 18px; }
         .form-group { margin-bottom: 16px; }
         label { display: block; margin-bottom: 6px; color: #aaa; font-size: 14px; }
-        input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #333; background: #0f0f0f; color: #fff; font-size: 14px; }
+        input[type="text"], input[type="email"] { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #333; background: #0f0f0f; color: #fff; font-size: 14px; }
         input:focus { outline: none; border-color: #4f8cff; }
         button { padding: 12px 24px; border-radius: 8px; border: none; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s; }
         .btn-primary { background: #4f8cff; color: #fff; }
@@ -22,9 +22,7 @@
         .btn-secondary { background: #333; color: #fff; margin-right: 10px; }
         .btn-secondary:hover { background: #444; }
         .btn-success { background: #22c55e; color: #fff; }
-        .integrations { display: flex; gap: 12px; flex-wrap: wrap; }
-        .integration-btn { display: flex; align-items: center; gap: 8px; padding: 12px 20px; }
-        .integration-btn.connected { background: #22c55e; }
+        .btn-small { padding: 8px 16px; font-size: 12px; }
         .status { padding: 8px 16px; border-radius: 6px; font-size: 13px; margin-top: 12px; }
         .status.success { background: #22c55e20; color: #22c55e; }
         .status.error { background: #ef444420; color: #ef4444; }
@@ -46,6 +44,26 @@
         .hidden { display: none; }
         .loading { opacity: 0.5; pointer-events: none; }
         #app-logged-out, #app-logged-in { transition: all 0.3s; }
+
+        /* Integration cards */
+        .integration-card { background: #252525; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+        .integration-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .integration-header h3 { color: #fff; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+        .integration-header .account { color: #888; font-size: 13px; }
+        .connected-badge { background: #22c55e; color: #fff; padding: 4px 8px; border-radius: 4px; font-size: 11px; }
+        .not-connected-badge { background: #666; color: #fff; padding: 4px 8px; border-radius: 4px; font-size: 11px; }
+
+        /* Picker list */
+        .picker-list { max-height: 200px; overflow-y: auto; background: #1a1a1a; border-radius: 8px; padding: 8px; margin-top: 12px; }
+        .picker-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 6px; cursor: pointer; transition: background 0.2s; }
+        .picker-item:hover { background: #333; }
+        .picker-item.selected { background: #4f8cff30; border: 1px solid #4f8cff; }
+        .picker-item input[type="checkbox"] { width: 18px; height: 18px; accent-color: #4f8cff; }
+        .picker-item label { flex: 1; cursor: pointer; color: #e0e0e0; }
+        .picker-item .private-badge { background: #f59e0b30; color: #f59e0b; padding: 2px 6px; border-radius: 4px; font-size: 10px; }
+
+        .sync-actions { display: flex; gap: 10px; margin-top: 12px; align-items: center; }
+        .selected-count { color: #888; font-size: 13px; }
     </style>
 </head>
 <body>
@@ -80,38 +98,56 @@
 
             <!-- Integrations -->
             <div class="card">
-                <h2>Connect Your Tools</h2>
-                <div class="integrations">
-                    <button class="btn-secondary integration-btn" id="btn-linear" onclick="connectIntegration('linear')">
-                        <span>Linear</span>
-                    </button>
-                    <button class="btn-secondary integration-btn" id="btn-github" onclick="connectIntegration('github')">
-                        <span>GitHub</span>
-                    </button>
-                    <button class="btn-secondary integration-btn" id="btn-slack" onclick="connectIntegration('slack')">
-                        <span>Slack</span>
-                    </button>
-                </div>
+                <h2>Your Integrations</h2>
                 <div id="integration-status"></div>
-            </div>
 
-            <!-- Sync -->
-            <div class="card">
-                <h2>Sync Data</h2>
-                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                    <button class="btn-secondary" onclick="syncProvider('linear')">Sync Linear</button>
-                    <button class="btn-secondary" onclick="syncProvider('github')">Sync GitHub</button>
-                    <button class="btn-secondary" onclick="syncProvider('slack')">Sync Slack</button>
+                <!-- Linear -->
+                <div class="integration-card" id="integration-linear">
+                    <div class="integration-header">
+                        <h3>Linear <span id="linear-badge" class="not-connected-badge">Not Connected</span></h3>
+                        <button class="btn-secondary btn-small" id="linear-connect-btn" onclick="connectIntegration('linear')">Connect</button>
+                    </div>
+                    <div id="linear-account" class="account" style="display: none;"></div>
+                    <div id="linear-sync" style="display: none;">
+                        <div class="sync-actions">
+                            <button class="btn-primary btn-small" onclick="syncProvider('linear')">Sync All Issues</button>
+                        </div>
+                    </div>
                 </div>
-                <div class="form-group" style="margin-top: 16px;">
-                    <label>GitHub Repos (comma-separated)</label>
-                    <input type="text" id="github-repos" placeholder="owner/repo1, owner/repo2">
+
+                <!-- GitHub -->
+                <div class="integration-card" id="integration-github">
+                    <div class="integration-header">
+                        <h3>GitHub <span id="github-badge" class="not-connected-badge">Not Connected</span></h3>
+                        <button class="btn-secondary btn-small" id="github-connect-btn" onclick="connectIntegration('github')">Connect</button>
+                    </div>
+                    <div id="github-account" class="account" style="display: none;"></div>
+                    <div id="github-picker" style="display: none;">
+                        <p style="color: #888; font-size: 13px; margin-bottom: 8px;">Select repos to sync:</p>
+                        <div class="picker-list" id="github-repos-list">Loading repos...</div>
+                        <div class="sync-actions">
+                            <button class="btn-primary btn-small" onclick="syncGitHub()">Sync Selected</button>
+                            <span class="selected-count" id="github-selected-count">0 selected</span>
+                        </div>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label>Slack Channels (comma-separated)</label>
-                    <input type="text" id="slack-channels" placeholder="general, engineering">
+
+                <!-- Slack -->
+                <div class="integration-card" id="integration-slack">
+                    <div class="integration-header">
+                        <h3>Slack <span id="slack-badge" class="not-connected-badge">Not Connected</span></h3>
+                        <button class="btn-secondary btn-small" id="slack-connect-btn" onclick="connectIntegration('slack')">Connect</button>
+                    </div>
+                    <div id="slack-account" class="account" style="display: none;"></div>
+                    <div id="slack-picker" style="display: none;">
+                        <p style="color: #888; font-size: 13px; margin-bottom: 8px;">Select channels to sync:</p>
+                        <div class="picker-list" id="slack-channels-list">Loading channels...</div>
+                        <div class="sync-actions">
+                            <button class="btn-primary btn-small" onclick="syncSlack()">Sync Selected</button>
+                            <span class="selected-count" id="slack-selected-count">0 selected</span>
+                        </div>
+                    </div>
                 </div>
-                <div id="sync-status"></div>
             </div>
 
             <!-- Stats -->
@@ -166,6 +202,8 @@
         const API = '';  // Same origin
         let token = localStorage.getItem('scopedocs_token');
         let currentUser = null;
+        let selectedRepos = new Set();
+        let selectedChannels = new Set();
 
         // Check if logged in on load
         document.addEventListener('DOMContentLoaded', () => {
@@ -176,7 +214,7 @@
             // Check for OAuth callback
             const params = new URLSearchParams(window.location.search);
             if (params.get('connected')) {
-                showStatus('integration-status', `Connected ${params.get('connected')}!`, 'success');
+                showStatus('integration-status', `Successfully connected ${params.get('connected')}!`, 'success');
                 window.history.replaceState({}, '', '/');
                 checkAuth();
             }
@@ -189,6 +227,7 @@
         function showStatus(elementId, message, type) {
             const el = document.getElementById(elementId);
             el.innerHTML = `<div class="status ${type}">${message}</div>`;
+            setTimeout(() => { el.innerHTML = ''; }, 5000);
         }
 
         async function api(endpoint, options = {}) {
@@ -231,15 +270,8 @@
                 document.getElementById('user-name').textContent = currentUser.name || currentUser.email;
                 document.getElementById('user-id').textContent = currentUser.id;
 
-                // Update integration buttons
-                currentUser.integrations.forEach(i => {
-                    const btn = document.getElementById(`btn-${i.provider}`);
-                    if (btn) {
-                        btn.classList.add('connected');
-                        btn.textContent = `✓ ${i.provider}`;
-                    }
-                });
-
+                // Update integration cards
+                updateIntegrations();
                 loadStats();
             } catch (e) {
                 token = null;
@@ -247,6 +279,128 @@
                 document.getElementById('app-logged-out').classList.remove('hidden');
                 document.getElementById('app-logged-in').classList.add('hidden');
             }
+        }
+
+        function updateIntegrations() {
+            const integrations = currentUser.integrations || [];
+
+            // Linear
+            const linear = integrations.find(i => i.provider === 'linear');
+            if (linear) {
+                document.getElementById('linear-badge').textContent = 'Connected';
+                document.getElementById('linear-badge').className = 'connected-badge';
+                document.getElementById('linear-connect-btn').textContent = 'Reconnect';
+                document.getElementById('linear-sync').style.display = 'block';
+                const workspace = linear.workspace || {};
+                document.getElementById('linear-account').style.display = 'block';
+                document.getElementById('linear-account').innerHTML = `Connected as <strong>${workspace.user_name || 'Unknown'}</strong> in <strong>${workspace.org_name || 'Unknown org'}</strong>`;
+            }
+
+            // GitHub
+            const github = integrations.find(i => i.provider === 'github');
+            if (github) {
+                document.getElementById('github-badge').textContent = 'Connected';
+                document.getElementById('github-badge').className = 'connected-badge';
+                document.getElementById('github-connect-btn').textContent = 'Reconnect';
+                document.getElementById('github-picker').style.display = 'block';
+                const workspace = github.workspace || {};
+                document.getElementById('github-account').style.display = 'block';
+                document.getElementById('github-account').innerHTML = `Connected as <strong>@${workspace.user_name || 'Unknown'}</strong> (${workspace.name || ''})`;
+                loadGitHubRepos();
+            }
+
+            // Slack
+            const slack = integrations.find(i => i.provider === 'slack');
+            if (slack) {
+                document.getElementById('slack-badge').textContent = 'Connected';
+                document.getElementById('slack-badge').className = 'connected-badge';
+                document.getElementById('slack-connect-btn').textContent = 'Reconnect';
+                document.getElementById('slack-picker').style.display = 'block';
+                const workspace = slack.workspace || {};
+                document.getElementById('slack-account').style.display = 'block';
+                document.getElementById('slack-account').innerHTML = `Connected to <strong>${workspace.team_name || 'Unknown workspace'}</strong>`;
+                loadSlackChannels();
+            }
+        }
+
+        async function loadGitHubRepos() {
+            try {
+                const data = await api('/integrations/github/repos');
+                const list = document.getElementById('github-repos-list');
+
+                if (data.repos.length === 0) {
+                    list.innerHTML = '<p style="color: #666; padding: 12px;">No repos found</p>';
+                    return;
+                }
+
+                list.innerHTML = data.repos.map(repo => `
+                    <div class="picker-item" onclick="toggleRepo('${repo.full_name}', this)">
+                        <input type="checkbox" id="repo-${repo.full_name.replace('/', '-')}" onchange="updateRepoCount()">
+                        <label for="repo-${repo.full_name.replace('/', '-')}">${repo.full_name}</label>
+                        ${repo.private ? '<span class="private-badge">Private</span>' : ''}
+                    </div>
+                `).join('');
+            } catch (e) {
+                document.getElementById('github-repos-list').innerHTML = `<p style="color: #ef4444; padding: 12px;">Error: ${e.message}</p>`;
+            }
+        }
+
+        async function loadSlackChannels() {
+            try {
+                const data = await api('/integrations/slack/channels');
+                const list = document.getElementById('slack-channels-list');
+
+                if (data.channels.length === 0) {
+                    list.innerHTML = '<p style="color: #666; padding: 12px;">No channels found</p>';
+                    return;
+                }
+
+                list.innerHTML = data.channels.map(ch => `
+                    <div class="picker-item" onclick="toggleChannel('${ch.name}', this)">
+                        <input type="checkbox" id="channel-${ch.name}" onchange="updateChannelCount()">
+                        <label for="channel-${ch.name}">#${ch.name}</label>
+                        ${ch.is_private ? '<span class="private-badge">Private</span>' : ''}
+                    </div>
+                `).join('');
+            } catch (e) {
+                document.getElementById('slack-channels-list').innerHTML = `<p style="color: #ef4444; padding: 12px;">Error: ${e.message}</p>`;
+            }
+        }
+
+        function toggleRepo(repoName, element) {
+            const checkbox = element.querySelector('input[type="checkbox"]');
+            checkbox.checked = !checkbox.checked;
+
+            if (checkbox.checked) {
+                selectedRepos.add(repoName);
+                element.classList.add('selected');
+            } else {
+                selectedRepos.delete(repoName);
+                element.classList.remove('selected');
+            }
+            updateRepoCount();
+        }
+
+        function toggleChannel(channelName, element) {
+            const checkbox = element.querySelector('input[type="checkbox"]');
+            checkbox.checked = !checkbox.checked;
+
+            if (checkbox.checked) {
+                selectedChannels.add(channelName);
+                element.classList.add('selected');
+            } else {
+                selectedChannels.delete(channelName);
+                element.classList.remove('selected');
+            }
+            updateChannelCount();
+        }
+
+        function updateRepoCount() {
+            document.getElementById('github-selected-count').textContent = `${selectedRepos.size} selected`;
+        }
+
+        function updateChannelCount() {
+            document.getElementById('slack-selected-count').textContent = `${selectedChannels.size} selected`;
         }
 
         async function connectIntegration(provider) {
@@ -259,23 +413,45 @@
         }
 
         async function syncProvider(provider) {
-            const repos = document.getElementById('github-repos').value;
-            const channels = document.getElementById('slack-channels').value;
-
-            let url = `/sync/${provider}`;
-            const params = [];
-            if (provider === 'github' && repos) params.push(`repos=${encodeURIComponent(repos)}`);
-            if (provider === 'slack' && channels) params.push(`channels=${encodeURIComponent(channels)}`);
-            if (params.length) url += '?' + params.join('&');
-
-            showStatus('sync-status', `Syncing ${provider}...`, 'info');
-
+            showStatus('integration-status', `Syncing ${provider}...`, 'info');
             try {
-                const data = await api(url, { method: 'POST' });
-                showStatus('sync-status', `Synced! ${JSON.stringify(data)}`, 'success');
+                const data = await api(`/sync/${provider}`, { method: 'POST' });
+                showStatus('integration-status', `Synced! ${JSON.stringify(data)}`, 'success');
                 loadStats();
             } catch (e) {
-                showStatus('sync-status', `Error: ${e.message}`, 'error');
+                showStatus('integration-status', `Error: ${e.message}`, 'error');
+            }
+        }
+
+        async function syncGitHub() {
+            if (selectedRepos.size === 0) {
+                showStatus('integration-status', 'Please select at least one repo', 'error');
+                return;
+            }
+            const repos = Array.from(selectedRepos).join(',');
+            showStatus('integration-status', `Syncing ${selectedRepos.size} repos...`, 'info');
+            try {
+                const data = await api(`/sync/github?repos=${encodeURIComponent(repos)}`, { method: 'POST' });
+                showStatus('integration-status', `Synced ${data.github_prs || 0} PRs!`, 'success');
+                loadStats();
+            } catch (e) {
+                showStatus('integration-status', `Error: ${e.message}`, 'error');
+            }
+        }
+
+        async function syncSlack() {
+            if (selectedChannels.size === 0) {
+                showStatus('integration-status', 'Please select at least one channel', 'error');
+                return;
+            }
+            const channels = Array.from(selectedChannels).join(',');
+            showStatus('integration-status', `Syncing ${selectedChannels.size} channels...`, 'info');
+            try {
+                const data = await api(`/sync/slack?channels=${encodeURIComponent(channels)}`, { method: 'POST' });
+                showStatus('integration-status', `Synced ${data.slack_messages || 0} messages!`, 'success');
+                loadStats();
+            } catch (e) {
+                showStatus('integration-status', `Error: ${e.message}`, 'error');
             }
         }
 
@@ -309,7 +485,7 @@
                     </div>
                 `).join('');
             } catch (e) {
-                showStatus('issues-list', `Error: ${e.message}`, 'error');
+                document.getElementById('issues-list').innerHTML = `<p style="color: #ef4444;">Error: ${e.message}</p>`;
             }
         }
 
