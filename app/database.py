@@ -79,33 +79,76 @@ CREATE TABLE IF NOT EXISTS user_integrations (
     UNIQUE(user_id, provider)
 );
 
--- Add user_id to existing tables (if not exists)
-DO $$
-BEGIN
-    -- Linear issues
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='linear_issues' AND column_name='user_id') THEN
-        ALTER TABLE linear_issues ADD COLUMN user_id UUID REFERENCES users(id) ON DELETE CASCADE;
-        CREATE INDEX idx_linear_issues_user ON linear_issues(user_id);
-    END IF;
+-- Linear issues (multi-tenant with user_id)
+CREATE TABLE IF NOT EXISTS linear_issues (
+    id TEXT PRIMARY KEY,
+    identifier TEXT NOT NULL,
+    title TEXT,
+    description TEXT,
+    status TEXT,
+    priority TEXT,
+    assignee_name TEXT,
+    team_name TEXT,
+    project_name TEXT,
+    labels TEXT[],
+    created_at TIMESTAMP WITH TIME ZONE,
+    updated_at TIMESTAMP WITH TIME ZONE,
+    raw_data JSONB,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    synced_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_linear_issues_user ON linear_issues(user_id);
+CREATE INDEX IF NOT EXISTS idx_linear_issues_identifier ON linear_issues(identifier);
 
-    -- GitHub PRs
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='github_prs' AND column_name='user_id') THEN
-        ALTER TABLE github_prs ADD COLUMN user_id UUID REFERENCES users(id) ON DELETE CASCADE;
-        CREATE INDEX idx_github_prs_user ON github_prs(user_id);
-    END IF;
+-- GitHub PRs (multi-tenant with user_id)
+CREATE TABLE IF NOT EXISTS github_prs (
+    id TEXT PRIMARY KEY,
+    number INTEGER NOT NULL,
+    repo TEXT NOT NULL,
+    title TEXT,
+    body TEXT,
+    state TEXT,
+    author TEXT,
+    created_at TIMESTAMP WITH TIME ZONE,
+    merged_at TIMESTAMP WITH TIME ZONE,
+    closed_at TIMESTAMP WITH TIME ZONE,
+    raw_data JSONB,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    synced_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_github_prs_user ON github_prs(user_id);
+CREATE INDEX IF NOT EXISTS idx_github_prs_repo ON github_prs(repo);
 
-    -- Slack messages
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='slack_messages' AND column_name='user_id') THEN
-        ALTER TABLE slack_messages ADD COLUMN user_id UUID REFERENCES users(id) ON DELETE CASCADE;
-        CREATE INDEX idx_slack_messages_user ON slack_messages(user_id);
-    END IF;
+-- Slack messages (multi-tenant with user_id)
+CREATE TABLE IF NOT EXISTS slack_messages (
+    id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL,
+    channel_name TEXT,
+    thread_ts TEXT,
+    message_text TEXT,
+    user_name TEXT,
+    created_at TIMESTAMP WITH TIME ZONE,
+    raw_data JSONB,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    synced_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_slack_messages_user ON slack_messages(user_id);
+CREATE INDEX IF NOT EXISTS idx_slack_messages_channel ON slack_messages(channel_id);
 
-    -- Links
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='links' AND column_name='user_id') THEN
-        ALTER TABLE links ADD COLUMN user_id UUID REFERENCES users(id) ON DELETE CASCADE;
-        CREATE INDEX idx_links_user ON links(user_id);
-    END IF;
-END $$;
+-- Links between artifacts (multi-tenant with user_id)
+CREATE TABLE IF NOT EXISTS links (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_type TEXT NOT NULL,  -- 'github_pr', 'slack_message'
+    source_id TEXT NOT NULL,
+    target_type TEXT NOT NULL,  -- 'linear_issue'
+    target_id TEXT NOT NULL,
+    link_type TEXT,  -- 'implements', 'discusses'
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(source_type, source_id, target_type, target_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_links_user ON links(user_id);
+CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_type, target_id);
 
 -- Sync jobs tracking
 CREATE TABLE IF NOT EXISTS sync_jobs (
