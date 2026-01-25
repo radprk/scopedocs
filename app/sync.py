@@ -34,6 +34,7 @@ query Issues($first: Int!, $after: String) {
 
 async def sync_linear(conn: asyncpg.Connection, user_id: UUID, access_token: str, max_issues: int = 500) -> int:
     """Pull issues from Linear and store them."""
+    user_id_str = str(user_id)  # Convert UUID to string for DB
     issues = []
     cursor = None
 
@@ -77,7 +78,7 @@ async def sync_linear(conn: asyncpg.Connection, user_id: UUID, access_token: str
                     id, identifier, title, description, status, priority,
                     assignee_name, team_name, project_name, labels,
                     created_at, updated_at, raw_data, user_id, synced_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::uuid, NOW())
                 ON CONFLICT (id) DO UPDATE SET
                     title = EXCLUDED.title, description = EXCLUDED.description,
                     status = EXCLUDED.status, priority = EXCLUDED.priority,
@@ -96,7 +97,7 @@ async def sync_linear(conn: asyncpg.Connection, user_id: UUID, access_token: str
                 datetime.fromisoformat(issue["createdAt"].replace("Z", "+00:00")) if issue.get("createdAt") else None,
                 datetime.fromisoformat(issue["updatedAt"].replace("Z", "+00:00")) if issue.get("updatedAt") else None,
                 json.dumps(issue),
-                user_id,
+                user_id_str,
             )
             stored += 1
         except Exception as e:
@@ -109,6 +110,7 @@ async def sync_linear(conn: asyncpg.Connection, user_id: UUID, access_token: str
 
 async def sync_github(conn: asyncpg.Connection, user_id: UUID, access_token: str, repos: List[str], max_prs: int = 100) -> int:
     """Pull PRs from GitHub and store them."""
+    user_id_str = str(user_id)
     total_stored = 0
 
     async with httpx.AsyncClient(timeout=30) as client:
@@ -135,7 +137,7 @@ async def sync_github(conn: asyncpg.Connection, user_id: UUID, access_token: str
                         INSERT INTO github_prs (
                             id, number, repo, title, body, state, author,
                             created_at, merged_at, closed_at, raw_data, user_id, synced_at
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::uuid, NOW())
                         ON CONFLICT (id) DO UPDATE SET
                             title = EXCLUDED.title, body = EXCLUDED.body,
                             state = EXCLUDED.state, merged_at = EXCLUDED.merged_at,
@@ -150,7 +152,7 @@ async def sync_github(conn: asyncpg.Connection, user_id: UUID, access_token: str
                         datetime.fromisoformat(pr["merged_at"].replace("Z", "+00:00")) if pr.get("merged_at") else None,
                         datetime.fromisoformat(pr["closed_at"].replace("Z", "+00:00")) if pr.get("closed_at") else None,
                         json.dumps(pr),
-                        user_id,
+                        user_id_str,
                     )
                     total_stored += 1
                 except Exception as e:
@@ -163,6 +165,7 @@ async def sync_github(conn: asyncpg.Connection, user_id: UUID, access_token: str
 
 async def sync_slack(conn: asyncpg.Connection, user_id: UUID, access_token: str, channels: List[str], days: int = 30) -> int:
     """Pull messages from Slack and store them."""
+    user_id_str = str(user_id)
     total_stored = 0
     oldest = (datetime.now() - timedelta(days=days)).timestamp()
 
@@ -205,8 +208,8 @@ async def sync_slack(conn: asyncpg.Connection, user_id: UUID, access_token: str,
                     await conn.execute("""
                         INSERT INTO slack_messages (
                             id, channel_id, channel_name, thread_ts, message_text,
-                            user_id, created_at, raw_data, user_id, synced_at
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+                            user_name, created_at, raw_data, user_id, synced_at
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid, NOW())
                         ON CONFLICT (id) DO UPDATE SET
                             message_text = EXCLUDED.message_text,
                             raw_data = EXCLUDED.raw_data, synced_at = NOW()
@@ -214,10 +217,10 @@ async def sync_slack(conn: asyncpg.Connection, user_id: UUID, access_token: str,
                         msg_id, channel_id, channel_name,
                         msg.get("thread_ts", msg["ts"]),
                         msg.get("text"),
-                        msg.get("user"),
+                        msg.get("user"),  # Slack user ID as user_name
                         datetime.fromtimestamp(float(msg["ts"])),
                         json.dumps(msg),
-                        user_id,
+                        user_id_str,  # Owner user_id
                     )
                     total_stored += 1
                 except Exception as e:
@@ -238,11 +241,12 @@ def extract_issue_refs(text: str) -> List[str]:
 async def create_links(conn: asyncpg.Connection, user_id: UUID) -> int:
     """Create links between artifacts based on mentions."""
     links_created = 0
+    user_id_str = str(user_id)  # Convert UUID to string
 
     # Link PRs to Linear issues
     prs = await conn.fetch(
-        "SELECT id, repo, number, title, body FROM github_prs WHERE user_id = $1",
-        user_id
+        "SELECT id, repo, number, title, body FROM github_prs WHERE user_id = $1::uuid",
+        user_id_str
     )
 
     for pr in prs:
@@ -251,17 +255,17 @@ async def create_links(conn: asyncpg.Connection, user_id: UUID) -> int:
             try:
                 await conn.execute("""
                     INSERT INTO links (source_type, source_id, target_type, target_id, link_type, user_id)
-                    VALUES ('github_pr', $1, 'linear_issue', $2, 'implements', $3)
+                    VALUES ('github_pr', $1, 'linear_issue', $2, 'implements', $3::uuid)
                     ON CONFLICT DO NOTHING
-                """, f"{pr['repo']}#{pr['number']}", ref, user_id)
+                """, f"{pr['repo']}#{pr['number']}", ref, user_id_str)
                 links_created += 1
             except:
                 pass
 
     # Link Slack messages to Linear issues
     messages = await conn.fetch(
-        "SELECT id, message_text FROM slack_messages WHERE user_id = $1",
-        user_id
+        "SELECT id, message_text FROM slack_messages WHERE user_id = $1::uuid",
+        user_id_str
     )
 
     for msg in messages:
@@ -269,9 +273,9 @@ async def create_links(conn: asyncpg.Connection, user_id: UUID) -> int:
             try:
                 await conn.execute("""
                     INSERT INTO links (source_type, source_id, target_type, target_id, link_type, user_id)
-                    VALUES ('slack_message', $1, 'linear_issue', $2, 'discusses', $3)
+                    VALUES ('slack_message', $1, 'linear_issue', $2, 'discusses', $3::uuid)
                     ON CONFLICT DO NOTHING
-                """, msg['id'], ref, user_id)
+                """, msg['id'], ref, user_id_str)
                 links_created += 1
             except:
                 pass

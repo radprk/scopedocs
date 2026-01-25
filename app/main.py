@@ -277,19 +277,20 @@ async def trigger_sync(
 @app.get("/stats", tags=["Query"])
 async def get_stats(user_id: UUID = Depends(get_current_user)):
     """Get sync statistics for current user."""
+    user_id_str = str(user_id)  # Convert UUID to string for query
     async with get_pool().acquire() as conn:
         stats = {
             "linear_issues": await conn.fetchval(
-                "SELECT COUNT(*) FROM linear_issues WHERE user_id = $1", user_id
+                "SELECT COUNT(*) FROM linear_issues WHERE user_id = $1::uuid", user_id_str
             ),
             "github_prs": await conn.fetchval(
-                "SELECT COUNT(*) FROM github_prs WHERE user_id = $1", user_id
+                "SELECT COUNT(*) FROM github_prs WHERE user_id = $1::uuid", user_id_str
             ),
             "slack_messages": await conn.fetchval(
-                "SELECT COUNT(*) FROM slack_messages WHERE user_id = $1", user_id
+                "SELECT COUNT(*) FROM slack_messages WHERE user_id = $1::uuid", user_id_str
             ),
             "links": await conn.fetchval(
-                "SELECT COUNT(*) FROM links WHERE user_id = $1", user_id
+                "SELECT COUNT(*) FROM links WHERE user_id = $1::uuid", user_id_str
             ),
         }
         return stats
@@ -301,11 +302,12 @@ async def get_context(issue_id: str, user_id: UUID = Depends(get_current_user)):
     Get full context for a Linear issue - THE MAIN VALUE!
     Returns the issue with all linked PRs and Slack discussions.
     """
+    user_id_str = str(user_id)
     async with get_pool().acquire() as conn:
         # Get issue
         issue = await conn.fetchrow(
-            "SELECT * FROM linear_issues WHERE identifier = $1 AND user_id = $2",
-            issue_id, user_id
+            "SELECT * FROM linear_issues WHERE identifier = $1 AND user_id = $2::uuid",
+            issue_id, user_id_str
         )
         if not issue:
             raise HTTPException(status_code=404, detail="Issue not found")
@@ -328,8 +330,8 @@ async def get_context(issue_id: str, user_id: UUID = Depends(get_current_user)):
             SELECT DISTINCT p.repo, p.number, p.title, p.state, p.author, p.created_at, p.merged_at
             FROM github_prs p
             JOIN links l ON l.source_id = p.repo || '#' || p.number
-            WHERE l.target_id = $1 AND l.target_type = 'linear_issue' AND l.user_id = $2
-        """, issue_id, user_id)
+            WHERE l.target_id = $1 AND l.target_type = 'linear_issue' AND l.user_id = $2::uuid
+        """, issue_id, user_id_str)
 
         for pr in prs:
             result["prs"].append({
@@ -345,8 +347,8 @@ async def get_context(issue_id: str, user_id: UUID = Depends(get_current_user)):
             SELECT DISTINCT s.channel_name, s.message_text, s.user_id as slack_user, s.created_at
             FROM slack_messages s
             JOIN links l ON l.source_id = s.id
-            WHERE l.target_id = $1 AND l.target_type = 'linear_issue' AND l.user_id = $2
-        """, issue_id, user_id)
+            WHERE l.target_id = $1 AND l.target_type = 'linear_issue' AND l.user_id = $2::uuid
+        """, issue_id, user_id_str)
 
         for msg in messages:
             result["discussions"].append({
@@ -366,9 +368,10 @@ async def list_issues(
     user_id: UUID = Depends(get_current_user)
 ):
     """List Linear issues for current user."""
+    user_id_str = str(user_id)
     async with get_pool().acquire() as conn:
-        query = "SELECT identifier, title, status, team_name, assignee_name FROM linear_issues WHERE user_id = $1"
-        params = [user_id]
+        query = "SELECT identifier, title, status, team_name, assignee_name FROM linear_issues WHERE user_id = $1::uuid"
+        params = [user_id_str]
 
         if team:
             params.append(team)
@@ -385,28 +388,29 @@ async def list_issues(
 @app.get("/search", tags=["Query"])
 async def search(q: str, user_id: UUID = Depends(get_current_user)):
     """Search across all data sources."""
+    user_id_str = str(user_id)
     async with get_pool().acquire() as conn:
         results = {"issues": [], "prs": [], "messages": []}
 
         issues = await conn.fetch("""
             SELECT identifier, title, status FROM linear_issues
-            WHERE user_id = $1 AND (title ILIKE $2 OR description ILIKE $2)
+            WHERE user_id = $1::uuid AND (title ILIKE $2 OR description ILIKE $2)
             LIMIT 20
-        """, user_id, f"%{q}%")
+        """, user_id_str, f"%{q}%")
         results["issues"] = [dict(r) for r in issues]
 
         prs = await conn.fetch("""
             SELECT repo, number, title, state FROM github_prs
-            WHERE user_id = $1 AND (title ILIKE $2 OR body ILIKE $2)
+            WHERE user_id = $1::uuid AND (title ILIKE $2 OR body ILIKE $2)
             LIMIT 20
-        """, user_id, f"%{q}%")
+        """, user_id_str, f"%{q}%")
         results["prs"] = [dict(r) for r in prs]
 
         messages = await conn.fetch("""
             SELECT id, channel_name, message_text FROM slack_messages
-            WHERE user_id = $1 AND message_text ILIKE $2
+            WHERE user_id = $1::uuid AND message_text ILIKE $2
             LIMIT 20
-        """, user_id, f"%{q}%")
+        """, user_id_str, f"%{q}%")
         results["messages"] = [dict(r) for r in messages]
 
         return results
