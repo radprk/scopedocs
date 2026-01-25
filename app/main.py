@@ -245,25 +245,37 @@ async def trigger_sync(
 
         results = {}
 
-        if provider in ['linear', 'all'] and 'linear' in tokens:
-            count = await sync_linear(conn, user_id, tokens['linear'])
-            results['linear_issues'] = count
-
-        if provider in ['github', 'all'] and 'github' in tokens:
-            repo_list = [r.strip() for r in (repos or "").split(",") if r.strip()]
-            if not repo_list:
-                results['github_error'] = "No repos specified. Use ?repos=org/repo1,org/repo2"
+        # Linear sync
+        if provider in ['linear', 'all']:
+            if 'linear' not in tokens:
+                results['linear_error'] = "Not connected. Click 'Linear' button to connect first."
             else:
-                count = await sync_github(conn, user_id, tokens['github'], repo_list)
-                results['github_prs'] = count
+                count = await sync_linear(conn, user_id, tokens['linear'])
+                results['linear_issues'] = count
 
-        if provider in ['slack', 'all'] and 'slack' in tokens:
-            channel_list = [c.strip() for c in (channels or "").split(",") if c.strip()]
-            if not channel_list:
-                results['slack_error'] = "No channels specified. Use ?channels=general,engineering"
+        # GitHub sync
+        if provider in ['github', 'all']:
+            if 'github' not in tokens:
+                results['github_error'] = "Not connected. Click 'GitHub' button to connect first."
             else:
-                count = await sync_slack(conn, user_id, tokens['slack'], channel_list)
-                results['slack_messages'] = count
+                repo_list = [r.strip() for r in (repos or "").split(",") if r.strip()]
+                if not repo_list:
+                    results['github_error'] = "No repos specified. Use ?repos=org/repo1,org/repo2"
+                else:
+                    count = await sync_github(conn, user_id, tokens['github'], repo_list)
+                    results['github_prs'] = count
+
+        # Slack sync
+        if provider in ['slack', 'all']:
+            if 'slack' not in tokens:
+                results['slack_error'] = "Not connected. Click 'Slack' button to connect first."
+            else:
+                channel_list = [c.strip() for c in (channels or "").split(",") if c.strip()]
+                if not channel_list:
+                    results['slack_error'] = "No channels specified. Use ?channels=general,engineering"
+                else:
+                    count = await sync_slack(conn, user_id, tokens['slack'], channel_list)
+                    results['slack_messages'] = count
 
         # Create links
         links = await create_links(conn, user_id)
