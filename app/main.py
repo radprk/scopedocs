@@ -250,19 +250,30 @@ async def trigger_sync(
         raise HTTPException(status_code=400, detail="Invalid provider")
 
     async with get_pool().acquire() as conn:
-        # Get user's tokens
+        # Get user's OAuth tokens
         integrations = await conn.fetch(
             "SELECT provider, access_token FROM user_integrations WHERE user_id = $1",
             user_id
         )
         tokens = {i['provider']: i['access_token'] for i in integrations}
 
+        # Fallback to env tokens for local dev (if OAuth not connected)
+        if 'github' not in tokens and os.environ.get('GITHUB_TOKEN'):
+            tokens['github'] = os.environ['GITHUB_TOKEN']
+            print(f"[Sync] Using GITHUB_TOKEN from .env (OAuth not connected)")
+        if 'slack' not in tokens and os.environ.get('SLACK_BOT_TOKEN'):
+            tokens['slack'] = os.environ['SLACK_BOT_TOKEN']
+            print(f"[Sync] Using SLACK_BOT_TOKEN from .env (OAuth not connected)")
+        if 'linear' not in tokens and os.environ.get('LINEAR_API_KEY'):
+            tokens['linear'] = os.environ['LINEAR_API_KEY']
+            print(f"[Sync] Using LINEAR_API_KEY from .env (OAuth not connected)")
+
         results = {}
 
         # Linear sync
         if provider in ['linear', 'all']:
             if 'linear' not in tokens:
-                results['linear_error'] = "Not connected. Click 'Linear' button to connect first."
+                results['linear_error'] = "Not connected. Connect Linear via OAuth or add LINEAR_API_KEY to .env"
             else:
                 count = await sync_linear(conn, user_id, tokens['linear'])
                 results['linear_issues'] = count
@@ -270,7 +281,7 @@ async def trigger_sync(
         # GitHub sync
         if provider in ['github', 'all']:
             if 'github' not in tokens:
-                results['github_error'] = "Not connected. Click 'GitHub' button to connect first."
+                results['github_error'] = "Not connected. Connect GitHub via OAuth or add GITHUB_TOKEN to .env"
             else:
                 repo_list = [r.strip() for r in (repos or "").split(",") if r.strip()]
                 if not repo_list:
@@ -282,7 +293,7 @@ async def trigger_sync(
         # Slack sync
         if provider in ['slack', 'all']:
             if 'slack' not in tokens:
-                results['slack_error'] = "Not connected. Click 'Slack' button to connect first."
+                results['slack_error'] = "Not connected. Connect Slack via OAuth or add SLACK_BOT_TOKEN to .env"
             else:
                 channel_list = [c.strip() for c in (channels or "").split(",") if c.strip()]
                 if not channel_list:
@@ -308,13 +319,23 @@ async def get_github_repos(user_id: UUID = Depends(get_current_user)):
             "SELECT access_token, workspace_info FROM user_integrations WHERE user_id = $1 AND provider = 'github'",
             user_id
         )
-        if not integration:
-            raise HTTPException(status_code=400, detail="GitHub not connected")
+
+        access_token = None
+        account = {}
+        if integration:
+            access_token = integration['access_token']
+            account = json.loads(integration['workspace_info']) if integration['workspace_info'] else {}
+        elif os.environ.get('GITHUB_TOKEN'):
+            access_token = os.environ['GITHUB_TOKEN']
+            account = {"source": "env", "note": "Using GITHUB_TOKEN from .env"}
+
+        if not access_token:
+            raise HTTPException(status_code=400, detail="GitHub not connected. Connect via OAuth or add GITHUB_TOKEN to .env")
 
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(
                 "https://api.github.com/user/repos",
-                headers={"Authorization": f"Bearer {integration['access_token']}", "Accept": "application/vnd.github.v3+json"},
+                headers={"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.github.v3+json"},
                 params={"sort": "updated", "per_page": 100}
             )
             if response.status_code != 200:
@@ -322,7 +343,7 @@ async def get_github_repos(user_id: UUID = Depends(get_current_user)):
 
             repos = response.json()
             return {
-                "account": json.loads(integration['workspace_info']) if integration['workspace_info'] else {},
+                "account": account,
                 "repos": [{"full_name": r["full_name"], "private": r["private"], "updated_at": r["updated_at"]} for r in repos]
             }
 
@@ -335,13 +356,23 @@ async def get_slack_channels(user_id: UUID = Depends(get_current_user)):
             "SELECT access_token, workspace_info FROM user_integrations WHERE user_id = $1 AND provider = 'slack'",
             user_id
         )
-        if not integration:
-            raise HTTPException(status_code=400, detail="Slack not connected")
+
+        access_token = None
+        account = {}
+        if integration:
+            access_token = integration['access_token']
+            account = json.loads(integration['workspace_info']) if integration['workspace_info'] else {}
+        elif os.environ.get('SLACK_BOT_TOKEN'):
+            access_token = os.environ['SLACK_BOT_TOKEN']
+            account = {"source": "env", "note": "Using SLACK_BOT_TOKEN from .env"}
+
+        if not access_token:
+            raise HTTPException(status_code=400, detail="Slack not connected. Connect via OAuth or add SLACK_BOT_TOKEN to .env")
 
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(
                 "https://slack.com/api/conversations.list",
-                headers={"Authorization": f"Bearer {integration['access_token']}"},
+                headers={"Authorization": f"Bearer {access_token}"},
                 params={"types": "public_channel,private_channel", "limit": 200}
             )
             data = response.json()
@@ -349,7 +380,7 @@ async def get_slack_channels(user_id: UUID = Depends(get_current_user)):
                 raise HTTPException(status_code=500, detail=f"Slack API error: {data.get('error')}")
 
             return {
-                "account": json.loads(integration['workspace_info']) if integration['workspace_info'] else {},
+                "account": account,
                 "channels": [{"name": c["name"], "id": c["id"], "is_private": c.get("is_private", False)} for c in data.get("channels", [])]
             }
 

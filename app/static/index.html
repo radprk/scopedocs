@@ -92,8 +92,13 @@
         <div id="app-logged-in" class="hidden">
             <!-- User Info -->
             <div class="card">
-                <h2>Welcome, <span id="user-name">User</span></h2>
-                <p style="color: #888; font-size: 14px;">User ID: <code id="user-id" style="color: #4f8cff;"></code></p>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <h2>Welcome, <span id="user-name">User</span></h2>
+                        <p style="color: #888; font-size: 14px;">User ID: <code id="user-id" style="color: #4f8cff;"></code></p>
+                    </div>
+                    <button class="btn-secondary btn-small" onclick="logout()" style="background: #ef4444;">Log Out</button>
+                </div>
             </div>
 
             <!-- Integrations -->
@@ -281,6 +286,34 @@
             }
         }
 
+        function logout() {
+            token = null;
+            currentUser = null;
+            selectedRepos = new Set();
+            selectedChannels = new Set();
+            localStorage.removeItem('scopedocs_token');
+            document.getElementById('app-logged-out').classList.remove('hidden');
+            document.getElementById('app-logged-in').classList.add('hidden');
+
+            // Reset integration UI
+            ['linear', 'github', 'slack'].forEach(p => {
+                document.getElementById(`${p}-badge`).textContent = 'Not Connected';
+                document.getElementById(`${p}-badge`).className = 'not-connected-badge';
+                document.getElementById(`${p}-connect-btn`).textContent = 'Connect';
+                document.getElementById(`${p}-account`).style.display = 'none';
+            });
+            document.getElementById('linear-sync').style.display = 'none';
+            document.getElementById('github-picker').style.display = 'none';
+            document.getElementById('slack-picker').style.display = 'none';
+
+            // Reset stats
+            ['stat-issues', 'stat-prs', 'stat-messages', 'stat-links'].forEach(id => {
+                document.getElementById(id).textContent = '0';
+            });
+            document.getElementById('issues-list').innerHTML = '';
+            document.getElementById('context-panel').classList.add('hidden');
+        }
+
         function updateIntegrations() {
             const integrations = currentUser.integrations || [];
 
@@ -294,6 +327,9 @@
                 const workspace = linear.workspace || {};
                 document.getElementById('linear-account').style.display = 'block';
                 document.getElementById('linear-account').innerHTML = `Connected as <strong>${workspace.user_name || 'Unknown'}</strong> in <strong>${workspace.org_name || 'Unknown org'}</strong>`;
+            } else {
+                // Show sync button anyway (env token fallback)
+                document.getElementById('linear-sync').style.display = 'block';
             }
 
             // GitHub
@@ -302,12 +338,12 @@
                 document.getElementById('github-badge').textContent = 'Connected';
                 document.getElementById('github-badge').className = 'connected-badge';
                 document.getElementById('github-connect-btn').textContent = 'Reconnect';
-                document.getElementById('github-picker').style.display = 'block';
                 const workspace = github.workspace || {};
                 document.getElementById('github-account').style.display = 'block';
                 document.getElementById('github-account').innerHTML = `Connected as <strong>@${workspace.user_name || 'Unknown'}</strong> (${workspace.name || ''})`;
-                loadGitHubRepos();
             }
+            // Always try loading repos (works with OAuth or env token)
+            tryLoadGitHubRepos();
 
             // Slack
             const slack = integrations.find(i => i.provider === 'slack');
@@ -315,18 +351,27 @@
                 document.getElementById('slack-badge').textContent = 'Connected';
                 document.getElementById('slack-badge').className = 'connected-badge';
                 document.getElementById('slack-connect-btn').textContent = 'Reconnect';
-                document.getElementById('slack-picker').style.display = 'block';
                 const workspace = slack.workspace || {};
                 document.getElementById('slack-account').style.display = 'block';
                 document.getElementById('slack-account').innerHTML = `Connected to <strong>${workspace.team_name || 'Unknown workspace'}</strong>`;
-                loadSlackChannels();
             }
+            // Always try loading channels (works with OAuth or env token)
+            tryLoadSlackChannels();
         }
 
-        async function loadGitHubRepos() {
+        async function tryLoadGitHubRepos() {
             try {
                 const data = await api('/integrations/github/repos');
+                // Show the picker since we got repos
+                document.getElementById('github-picker').style.display = 'block';
                 const list = document.getElementById('github-repos-list');
+
+                if (data.account && data.account.source === 'env') {
+                    document.getElementById('github-badge').textContent = 'ENV Token';
+                    document.getElementById('github-badge').className = 'connected-badge';
+                    document.getElementById('github-account').style.display = 'block';
+                    document.getElementById('github-account').innerHTML = 'Using <strong>GITHUB_TOKEN</strong> from .env';
+                }
 
                 if (data.repos.length === 0) {
                     list.innerHTML = '<p style="color: #666; padding: 12px;">No repos found</p>';
@@ -341,14 +386,23 @@
                     </div>
                 `).join('');
             } catch (e) {
-                document.getElementById('github-repos-list').innerHTML = `<p style="color: #ef4444; padding: 12px;">Error: ${e.message}</p>`;
+                // No token available - keep picker hidden, that's fine
             }
         }
 
-        async function loadSlackChannels() {
+        async function tryLoadSlackChannels() {
             try {
                 const data = await api('/integrations/slack/channels');
+                // Show the picker since we got channels
+                document.getElementById('slack-picker').style.display = 'block';
                 const list = document.getElementById('slack-channels-list');
+
+                if (data.account && data.account.source === 'env') {
+                    document.getElementById('slack-badge').textContent = 'ENV Token';
+                    document.getElementById('slack-badge').className = 'connected-badge';
+                    document.getElementById('slack-account').style.display = 'block';
+                    document.getElementById('slack-account').innerHTML = 'Using <strong>SLACK_BOT_TOKEN</strong> from .env';
+                }
 
                 if (data.channels.length === 0) {
                     list.innerHTML = '<p style="color: #666; padding: 12px;">No channels found</p>';
@@ -363,7 +417,7 @@
                     </div>
                 `).join('');
             } catch (e) {
-                document.getElementById('slack-channels-list').innerHTML = `<p style="color: #ef4444; padding: 12px;">Error: ${e.message}</p>`;
+                // No token available - keep picker hidden, that's fine
             }
         }
 
