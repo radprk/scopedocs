@@ -71,6 +71,17 @@ oauth_states = {}
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", BASE_URL)  # Default to same origin
 
+def get_redirect_uri(provider: str) -> str:
+    """Get the OAuth redirect URI for a provider.
+    Allows per-provider overrides (e.g. Slack needs HTTPS via ngrok).
+    Config priority: SLACK_REDIRECT_URL > BASE_URL
+    """
+    env_key = f"{provider.upper()}_REDIRECT_URL"
+    override = os.environ.get(env_key)
+    if override:
+        return override
+    return f"{BASE_URL}/oauth/{provider}/callback"
+
 
 # ============ SIMPLE AUTH (for MVP) ============
 # In production, validate Supabase JWT tokens
@@ -159,7 +170,7 @@ async def oauth_authorize(provider: str, user_id: UUID = Depends(get_current_use
     state = secrets.token_urlsafe(32)
     oauth_states[state] = {"user_id": str(user_id), "provider": provider}
 
-    redirect_uri = f"{BASE_URL}/oauth/{provider}/callback"
+    redirect_uri = get_redirect_uri(provider)
     authorize_url = get_authorize_url(provider, redirect_uri, state)
 
     # Debug: show what URL we're generating
@@ -191,7 +202,7 @@ async def oauth_callback(provider: str, code: str, state: str):
     user_id = UUID(state_data['user_id'])
     print(f"[OAuth] Processing for user {user_id}")
 
-    redirect_uri = f"{BASE_URL}/oauth/{provider}/callback"
+    redirect_uri = get_redirect_uri(provider)
 
     try:
         # Exchange code for token
