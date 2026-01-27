@@ -100,30 +100,14 @@ def main():
     test("GET /oauth/invalid/authorize → 400", r, 400)
 
     # ---- Integrations (repos/channels) ----
-    print("\n4. Integration Data (repos/channels)")
+    print("\n4. Integration Data (requires OAuth - new user won't have it)")
     r = client.get("/integrations/github/repos", headers=headers)
-    if r.status_code == 200:
-        data = r.json()
-        repo_count = len(data.get("repos", []))
-        test("GET /integrations/github/repos", r)
-        source = "OAuth" if data.get("account", {}).get("user_name") else "ENV token"
-        print(f"  [{INFO}] Source: {source}, Repos: {repo_count}")
-        if repo_count > 0:
-            print(f"  [{INFO}] First 3: {[r['full_name'] for r in data['repos'][:3]]}")
-    else:
-        skip("GET /integrations/github/repos", "GitHub not connected and no GITHUB_TOKEN in .env")
+    test("GET /integrations/github/repos (no OAuth) → 400", r, 400)
+    print(f"  [{INFO}] Correctly requires OAuth connection")
 
     r = client.get("/integrations/slack/channels", headers=headers)
-    if r.status_code == 200:
-        data = r.json()
-        ch_count = len(data.get("channels", []))
-        test("GET /integrations/slack/channels", r)
-        source = "OAuth" if data.get("account", {}).get("team_name") else "ENV token"
-        print(f"  [{INFO}] Source: {source}, Channels: {ch_count}")
-        if ch_count > 0:
-            print(f"  [{INFO}] First 3: {[c['name'] for c in data['channels'][:3]]}")
-    else:
-        skip("GET /integrations/slack/channels", "Slack not connected and no SLACK_BOT_TOKEN in .env")
+    test("GET /integrations/slack/channels (no OAuth) → 400", r, 400)
+    print(f"  [{INFO}] Correctly requires OAuth connection")
 
     # ---- Sync ----
     print("\n5. Data Sync")

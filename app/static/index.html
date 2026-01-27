@@ -327,9 +327,6 @@
                 const workspace = linear.workspace || {};
                 document.getElementById('linear-account').style.display = 'block';
                 document.getElementById('linear-account').innerHTML = `Connected as <strong>${workspace.user_name || 'Unknown'}</strong> in <strong>${workspace.org_name || 'Unknown org'}</strong>`;
-            } else {
-                // Show sync button anyway (env token fallback)
-                document.getElementById('linear-sync').style.display = 'block';
             }
 
             // GitHub
@@ -341,9 +338,8 @@
                 const workspace = github.workspace || {};
                 document.getElementById('github-account').style.display = 'block';
                 document.getElementById('github-account').innerHTML = `Connected as <strong>@${workspace.user_name || 'Unknown'}</strong> (${workspace.name || ''})`;
+                tryLoadGitHubRepos();
             }
-            // Always try loading repos (works with OAuth or env token)
-            tryLoadGitHubRepos();
 
             // Slack
             const slack = integrations.find(i => i.provider === 'slack');
@@ -354,24 +350,15 @@
                 const workspace = slack.workspace || {};
                 document.getElementById('slack-account').style.display = 'block';
                 document.getElementById('slack-account').innerHTML = `Connected to <strong>${workspace.team_name || 'Unknown workspace'}</strong>`;
+                tryLoadSlackChannels();
             }
-            // Always try loading channels (works with OAuth or env token)
-            tryLoadSlackChannels();
         }
 
         async function tryLoadGitHubRepos() {
             try {
                 const data = await api('/integrations/github/repos');
-                // Show the picker since we got repos
                 document.getElementById('github-picker').style.display = 'block';
                 const list = document.getElementById('github-repos-list');
-
-                if (data.account && data.account.source === 'env') {
-                    document.getElementById('github-badge').textContent = 'ENV Token';
-                    document.getElementById('github-badge').className = 'connected-badge';
-                    document.getElementById('github-account').style.display = 'block';
-                    document.getElementById('github-account').innerHTML = 'Using <strong>GITHUB_TOKEN</strong> from .env';
-                }
 
                 if (data.repos.length === 0) {
                     list.innerHTML = '<p style="color: #666; padding: 12px;">No repos found</p>';
@@ -386,23 +373,15 @@
                     </div>
                 `).join('');
             } catch (e) {
-                // No token available - keep picker hidden, that's fine
+                // Not connected - picker stays hidden
             }
         }
 
         async function tryLoadSlackChannels() {
             try {
                 const data = await api('/integrations/slack/channels');
-                // Show the picker since we got channels
                 document.getElementById('slack-picker').style.display = 'block';
                 const list = document.getElementById('slack-channels-list');
-
-                if (data.account && data.account.source === 'env') {
-                    document.getElementById('slack-badge').textContent = 'ENV Token';
-                    document.getElementById('slack-badge').className = 'connected-badge';
-                    document.getElementById('slack-account').style.display = 'block';
-                    document.getElementById('slack-account').innerHTML = 'Using <strong>SLACK_BOT_TOKEN</strong> from .env';
-                }
 
                 if (data.channels.length === 0) {
                     list.innerHTML = '<p style="color: #666; padding: 12px;">No channels found</p>';
@@ -417,7 +396,7 @@
                     </div>
                 `).join('');
             } catch (e) {
-                // No token available - keep picker hidden, that's fine
+                // Not connected - picker stays hidden
             }
         }
 

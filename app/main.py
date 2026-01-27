@@ -261,30 +261,19 @@ async def trigger_sync(
         raise HTTPException(status_code=400, detail="Invalid provider")
 
     async with get_pool().acquire() as conn:
-        # Get user's OAuth tokens
+        # Get user's OAuth tokens (each user has their own)
         integrations = await conn.fetch(
             "SELECT provider, access_token FROM user_integrations WHERE user_id = $1",
             user_id
         )
         tokens = {i['provider']: i['access_token'] for i in integrations}
 
-        # Fallback to env tokens for local dev (if OAuth not connected)
-        if 'github' not in tokens and os.environ.get('GITHUB_TOKEN'):
-            tokens['github'] = os.environ['GITHUB_TOKEN']
-            print(f"[Sync] Using GITHUB_TOKEN from .env (OAuth not connected)")
-        if 'slack' not in tokens and os.environ.get('SLACK_BOT_TOKEN'):
-            tokens['slack'] = os.environ['SLACK_BOT_TOKEN']
-            print(f"[Sync] Using SLACK_BOT_TOKEN from .env (OAuth not connected)")
-        if 'linear' not in tokens and os.environ.get('LINEAR_API_KEY'):
-            tokens['linear'] = os.environ['LINEAR_API_KEY']
-            print(f"[Sync] Using LINEAR_API_KEY from .env (OAuth not connected)")
-
         results = {}
 
         # Linear sync
         if provider in ['linear', 'all']:
             if 'linear' not in tokens:
-                results['linear_error'] = "Not connected. Connect Linear via OAuth or add LINEAR_API_KEY to .env"
+                results['linear_error'] = "Not connected. Click Connect on Linear first."
             else:
                 count = await sync_linear(conn, user_id, tokens['linear'])
                 results['linear_issues'] = count
@@ -292,7 +281,7 @@ async def trigger_sync(
         # GitHub sync
         if provider in ['github', 'all']:
             if 'github' not in tokens:
-                results['github_error'] = "Not connected. Connect GitHub via OAuth or add GITHUB_TOKEN to .env"
+                results['github_error'] = "Not connected. Click Connect on GitHub first."
             else:
                 repo_list = [r.strip() for r in (repos or "").split(",") if r.strip()]
                 if not repo_list:
@@ -304,7 +293,7 @@ async def trigger_sync(
         # Slack sync
         if provider in ['slack', 'all']:
             if 'slack' not in tokens:
-                results['slack_error'] = "Not connected. Connect Slack via OAuth or add SLACK_BOT_TOKEN to .env"
+                results['slack_error'] = "Not connected. Click Connect on Slack first."
             else:
                 channel_list = [c.strip() for c in (channels or "").split(",") if c.strip()]
                 if not channel_list:
@@ -324,24 +313,18 @@ async def trigger_sync(
 
 @app.get("/integrations/github/repos", tags=["Integrations"])
 async def get_github_repos(user_id: UUID = Depends(get_current_user)):
-    """Fetch list of repos the user has access to."""
+    """Fetch list of repos the user has access to (requires OAuth connection)."""
     async with get_pool().acquire() as conn:
         integration = await conn.fetchrow(
             "SELECT access_token, workspace_info FROM user_integrations WHERE user_id = $1 AND provider = 'github'",
             user_id
         )
 
-        access_token = None
-        account = {}
-        if integration:
-            access_token = integration['access_token']
-            account = json.loads(integration['workspace_info']) if integration['workspace_info'] else {}
-        elif os.environ.get('GITHUB_TOKEN'):
-            access_token = os.environ['GITHUB_TOKEN']
-            account = {"source": "env", "note": "Using GITHUB_TOKEN from .env"}
+        if not integration:
+            raise HTTPException(status_code=400, detail="GitHub not connected. Click Connect to authorize.")
 
-        if not access_token:
-            raise HTTPException(status_code=400, detail="GitHub not connected. Connect via OAuth or add GITHUB_TOKEN to .env")
+        access_token = integration['access_token']
+        account = json.loads(integration['workspace_info']) if integration['workspace_info'] else {}
 
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(
@@ -361,24 +344,18 @@ async def get_github_repos(user_id: UUID = Depends(get_current_user)):
 
 @app.get("/integrations/slack/channels", tags=["Integrations"])
 async def get_slack_channels(user_id: UUID = Depends(get_current_user)):
-    """Fetch list of Slack channels the user has access to."""
+    """Fetch list of Slack channels the user has access to (requires OAuth connection)."""
     async with get_pool().acquire() as conn:
         integration = await conn.fetchrow(
             "SELECT access_token, workspace_info FROM user_integrations WHERE user_id = $1 AND provider = 'slack'",
             user_id
         )
 
-        access_token = None
-        account = {}
-        if integration:
-            access_token = integration['access_token']
-            account = json.loads(integration['workspace_info']) if integration['workspace_info'] else {}
-        elif os.environ.get('SLACK_BOT_TOKEN'):
-            access_token = os.environ['SLACK_BOT_TOKEN']
-            account = {"source": "env", "note": "Using SLACK_BOT_TOKEN from .env"}
+        if not integration:
+            raise HTTPException(status_code=400, detail="Slack not connected. Click Connect to authorize.")
 
-        if not access_token:
-            raise HTTPException(status_code=400, detail="Slack not connected. Connect via OAuth or add SLACK_BOT_TOKEN to .env")
+        access_token = integration['access_token']
+        account = json.loads(integration['workspace_info']) if integration['workspace_info'] else {}
 
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(
