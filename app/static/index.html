@@ -23,6 +23,7 @@
         .btn-secondary:hover { background: #444; }
         .btn-success { background: #22c55e; color: #fff; }
         .btn-small { padding: 8px 16px; font-size: 12px; }
+        .btn-danger { background: #ef4444; color: #fff; }
         .status { padding: 8px 16px; border-radius: 6px; font-size: 13px; margin-top: 12px; }
         .status.success { background: #22c55e20; color: #22c55e; }
         .status.error { background: #ef444420; color: #ef4444; }
@@ -43,7 +44,19 @@
         .pr-item, .slack-item { background: #1a1a1a; padding: 12px; border-radius: 6px; margin-bottom: 8px; }
         .hidden { display: none; }
         .loading { opacity: 0.5; pointer-events: none; }
-        #app-logged-out, #app-logged-in { transition: all 0.3s; }
+
+        /* Workspace selector */
+        .workspace-selector { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+        .workspace-dropdown { background: #252525; border: 1px solid #444; border-radius: 8px; padding: 10px 16px; color: #fff; font-size: 14px; cursor: pointer; min-width: 200px; }
+        .workspace-dropdown:focus { outline: none; border-color: #4f8cff; }
+
+        /* Workspace list */
+        .workspace-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+        .workspace-item { background: #252525; padding: 16px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; transition: all 0.2s; }
+        .workspace-item:hover { background: #303030; }
+        .workspace-item.active { border: 2px solid #4f8cff; }
+        .workspace-name { color: #fff; font-weight: 500; }
+        .workspace-role { color: #888; font-size: 12px; }
 
         /* Integration cards */
         .integration-card { background: #252525; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
@@ -64,6 +77,17 @@
 
         .sync-actions { display: flex; gap: 10px; margin-top: 12px; align-items: center; }
         .selected-count { color: #888; font-size: 13px; }
+
+        /* Members list */
+        .member-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #252525; border-radius: 6px; margin-bottom: 8px; }
+        .member-info { display: flex; flex-direction: column; }
+        .member-name { color: #fff; }
+        .member-email { color: #888; font-size: 12px; }
+        .member-role { color: #4f8cff; font-size: 12px; background: #4f8cff20; padding: 2px 8px; border-radius: 4px; }
+
+        /* Invite section */
+        .invite-box { background: #252525; border-radius: 8px; padding: 16px; margin-top: 16px; }
+        .invite-url { background: #1a1a1a; padding: 12px; border-radius: 6px; font-family: monospace; word-break: break-all; color: #4f8cff; }
     </style>
 </head>
 <body>
@@ -88,22 +112,73 @@
             </div>
         </div>
 
-        <!-- Logged In State -->
+        <!-- Logged In - No Workspace State -->
+        <div id="app-no-workspace" class="hidden">
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <div>
+                        <h2>Welcome, <span id="user-name-noworkspace">User</span></h2>
+                        <p style="color: #888; font-size: 14px;">You need to create or join a workspace to get started.</p>
+                    </div>
+                    <button class="btn-danger btn-small" onclick="logout()">Log Out</button>
+                </div>
+
+                <div class="form-group">
+                    <label>Create a new workspace</label>
+                    <input type="text" id="new-workspace-name" placeholder="My Team">
+                </div>
+                <button class="btn-primary" onclick="createWorkspace()">Create Workspace</button>
+
+                <div style="margin-top: 24px; padding-top: 24px; border-top: 1px solid #333;">
+                    <div class="form-group">
+                        <label>Or join with an invite code</label>
+                        <input type="text" id="invite-code" placeholder="Paste invite code">
+                    </div>
+                    <button class="btn-secondary" onclick="redeemInvite()">Join Workspace</button>
+                </div>
+
+                <div id="workspace-setup-status"></div>
+            </div>
+        </div>
+
+        <!-- Logged In - Has Workspace State -->
         <div id="app-logged-in" class="hidden">
-            <!-- User Info -->
+            <!-- User & Workspace Info -->
             <div class="card">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <div>
                         <h2>Welcome, <span id="user-name">User</span></h2>
-                        <p style="color: #888; font-size: 14px;">User ID: <code id="user-id" style="color: #4f8cff;"></code></p>
+                        <p style="color: #888; font-size: 14px;">
+                            Workspace: <strong id="workspace-name"></strong>
+                            <span id="workspace-role" class="member-role" style="margin-left: 8px;"></span>
+                        </p>
                     </div>
-                    <button class="btn-secondary btn-small" onclick="logout()" style="background: #ef4444;">Log Out</button>
+                    <div>
+                        <button class="btn-secondary btn-small" onclick="showWorkspaceList()">Switch Workspace</button>
+                        <button class="btn-danger btn-small" onclick="logout()">Log Out</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Workspace Members & Invites (for owners/admins) -->
+            <div class="card" id="workspace-management">
+                <h2>Workspace Members</h2>
+                <div id="members-list"></div>
+
+                <div class="invite-box" id="invite-section">
+                    <h3 style="color: #fff; font-size: 14px; margin-bottom: 12px;">Invite teammates</h3>
+                    <button class="btn-secondary btn-small" onclick="createInviteLink()">Generate Invite Link</button>
+                    <div id="invite-url-display" class="hidden" style="margin-top: 12px;">
+                        <p style="color: #888; font-size: 12px; margin-bottom: 8px;">Share this link with your team:</p>
+                        <div class="invite-url" id="invite-url"></div>
+                        <button class="btn-small btn-secondary" style="margin-top: 8px;" onclick="copyInviteLink()">Copy</button>
+                    </div>
                 </div>
             </div>
 
             <!-- Integrations -->
             <div class="card">
-                <h2>Your Integrations</h2>
+                <h2>Workspace Integrations</h2>
                 <div id="integration-status"></div>
 
                 <!-- Linear -->
@@ -157,7 +232,7 @@
 
             <!-- Stats -->
             <div class="card">
-                <h2>Your Data</h2>
+                <h2>Workspace Data</h2>
                 <div class="stats">
                     <div class="stat">
                         <div class="stat-value" id="stat-issues">0</div>
@@ -201,17 +276,47 @@
                 </div>
             </div>
         </div>
+
+        <!-- Workspace Switcher Modal -->
+        <div id="workspace-modal" class="hidden" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 1000;">
+            <div class="card" style="max-width: 500px; width: 90%;">
+                <h2>Your Workspaces</h2>
+                <div id="workspace-list" class="workspace-list"></div>
+
+                <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #333;">
+                    <div class="form-group">
+                        <label>Create new workspace</label>
+                        <input type="text" id="modal-new-workspace-name" placeholder="Workspace name">
+                    </div>
+                    <button class="btn-primary btn-small" onclick="createWorkspaceFromModal()">Create</button>
+                </div>
+
+                <button class="btn-secondary" onclick="hideWorkspaceList()" style="margin-top: 16px;">Close</button>
+            </div>
+        </div>
     </div>
 
     <script>
         const API = '';  // Same origin
         let token = localStorage.getItem('scopedocs_token');
+        let currentWorkspaceId = localStorage.getItem('scopedocs_workspace');
         let currentUser = null;
+        let currentWorkspace = null;
+        let workspaces = [];
         let selectedRepos = new Set();
         let selectedChannels = new Set();
 
         // Check if logged in on load
         document.addEventListener('DOMContentLoaded', () => {
+            // Check for invite code in URL (for invite links)
+            const path = window.location.pathname;
+            if (path.startsWith('/invite/')) {
+                const code = path.split('/invite/')[1];
+                if (code) {
+                    document.getElementById('invite-code').value = code;
+                }
+            }
+
             if (token) {
                 checkAuth();
             }
@@ -220,6 +325,10 @@
             const params = new URLSearchParams(window.location.search);
             if (params.get('connected')) {
                 showStatus('integration-status', `Successfully connected ${params.get('connected')}!`, 'success');
+                if (params.get('workspace')) {
+                    currentWorkspaceId = params.get('workspace');
+                    localStorage.setItem('scopedocs_workspace', currentWorkspaceId);
+                }
                 window.history.replaceState({}, '', '/');
                 checkAuth();
             }
@@ -231,6 +340,7 @@
 
         function showStatus(elementId, message, type) {
             const el = document.getElementById(elementId);
+            if (!el) return;
             el.innerHTML = `<div class="status ${type}">${message}</div>`;
             setTimeout(() => { el.innerHTML = ''; }, 5000);
         }
@@ -260,7 +370,7 @@
                 const data = await api(`/auth/signup?email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`, { method: 'POST' });
                 token = data.user_id;
                 localStorage.setItem('scopedocs_token', token);
-                showStatus('signup-status', 'Success! Logging you in...', 'success');
+                showStatus('signup-status', 'Success! Setting up...', 'success');
                 setTimeout(checkAuth, 500);
             } catch (e) {
                 showStatus('signup-status', `Error: ${e.message}`, 'error');
@@ -270,32 +380,173 @@
         async function checkAuth() {
             try {
                 currentUser = await api('/auth/me');
-                document.getElementById('app-logged-out').classList.add('hidden');
-                document.getElementById('app-logged-in').classList.remove('hidden');
-                document.getElementById('user-name').textContent = currentUser.name || currentUser.email;
-                document.getElementById('user-id').textContent = currentUser.id;
 
-                // Update integration cards
-                updateIntegrations();
-                loadStats();
+                // Load workspaces
+                const wsData = await api('/workspaces');
+                workspaces = wsData.workspaces || [];
+
+                document.getElementById('app-logged-out').classList.add('hidden');
+
+                if (workspaces.length === 0) {
+                    // No workspaces - show setup
+                    document.getElementById('app-no-workspace').classList.remove('hidden');
+                    document.getElementById('app-logged-in').classList.add('hidden');
+                    document.getElementById('user-name-noworkspace').textContent = currentUser.name || currentUser.email;
+                } else {
+                    // Has workspaces - check if we have a selected one
+                    if (!currentWorkspaceId || !workspaces.find(w => w.id === currentWorkspaceId)) {
+                        currentWorkspaceId = workspaces[0].id;
+                        localStorage.setItem('scopedocs_workspace', currentWorkspaceId);
+                    }
+                    await loadWorkspaceAndShow();
+                }
             } catch (e) {
                 token = null;
                 localStorage.removeItem('scopedocs_token');
                 document.getElementById('app-logged-out').classList.remove('hidden');
+                document.getElementById('app-no-workspace').classList.add('hidden');
                 document.getElementById('app-logged-in').classList.add('hidden');
             }
         }
 
-        function logout() {
-            token = null;
-            currentUser = null;
+        async function loadWorkspaceAndShow() {
+            try {
+                currentWorkspace = await api(`/workspaces/${currentWorkspaceId}`);
+
+                document.getElementById('app-no-workspace').classList.add('hidden');
+                document.getElementById('app-logged-in').classList.remove('hidden');
+
+                document.getElementById('user-name').textContent = currentUser.name || currentUser.email;
+                document.getElementById('workspace-name').textContent = currentWorkspace.name;
+
+                // Find current user's role
+                const myMembership = currentWorkspace.members.find(m => m.id === currentUser.id);
+                const role = myMembership ? myMembership.role : 'member';
+                document.getElementById('workspace-role').textContent = role;
+
+                // Show members
+                const membersList = document.getElementById('members-list');
+                membersList.innerHTML = currentWorkspace.members.map(m => `
+                    <div class="member-item">
+                        <div class="member-info">
+                            <span class="member-name">${m.name || m.email}</span>
+                            <span class="member-email">${m.email}</span>
+                        </div>
+                        <span class="member-role">${m.role}</span>
+                    </div>
+                `).join('');
+
+                // Show/hide invite section based on role
+                document.getElementById('invite-section').style.display =
+                    (role === 'owner' || role === 'admin') ? 'block' : 'none';
+
+                // Update integrations
+                updateIntegrations();
+                loadStats();
+            } catch (e) {
+                console.error('Failed to load workspace', e);
+                showStatus('integration-status', 'Failed to load workspace', 'error');
+            }
+        }
+
+        async function createWorkspace() {
+            const name = document.getElementById('new-workspace-name').value;
+            if (!name) {
+                showStatus('workspace-setup-status', 'Please enter a workspace name', 'error');
+                return;
+            }
+
+            try {
+                const data = await api(`/workspaces?name=${encodeURIComponent(name)}`, { method: 'POST' });
+                currentWorkspaceId = data.workspace_id;
+                localStorage.setItem('scopedocs_workspace', currentWorkspaceId);
+                showStatus('workspace-setup-status', 'Workspace created!', 'success');
+                setTimeout(checkAuth, 500);
+            } catch (e) {
+                showStatus('workspace-setup-status', `Error: ${e.message}`, 'error');
+            }
+        }
+
+        async function createWorkspaceFromModal() {
+            const name = document.getElementById('modal-new-workspace-name').value;
+            if (!name) return;
+
+            try {
+                const data = await api(`/workspaces?name=${encodeURIComponent(name)}`, { method: 'POST' });
+                currentWorkspaceId = data.workspace_id;
+                localStorage.setItem('scopedocs_workspace', currentWorkspaceId);
+                hideWorkspaceList();
+                checkAuth();
+            } catch (e) {
+                alert(`Error: ${e.message}`);
+            }
+        }
+
+        async function redeemInvite() {
+            const code = document.getElementById('invite-code').value.trim();
+            if (!code) {
+                showStatus('workspace-setup-status', 'Please enter an invite code', 'error');
+                return;
+            }
+
+            try {
+                const data = await api(`/invites/${code}/redeem`, { method: 'POST' });
+                currentWorkspaceId = data.workspace_id;
+                localStorage.setItem('scopedocs_workspace', currentWorkspaceId);
+                showStatus('workspace-setup-status', `Joined ${data.workspace_name}!`, 'success');
+                setTimeout(checkAuth, 500);
+            } catch (e) {
+                showStatus('workspace-setup-status', `Error: ${e.message}`, 'error');
+            }
+        }
+
+        async function createInviteLink() {
+            try {
+                const data = await api(`/workspaces/${currentWorkspaceId}/invites`, { method: 'POST' });
+                document.getElementById('invite-url').textContent = data.url;
+                document.getElementById('invite-url-display').classList.remove('hidden');
+            } catch (e) {
+                showStatus('integration-status', `Error: ${e.message}`, 'error');
+            }
+        }
+
+        function copyInviteLink() {
+            const url = document.getElementById('invite-url').textContent;
+            navigator.clipboard.writeText(url);
+            showStatus('integration-status', 'Copied to clipboard!', 'success');
+        }
+
+        function showWorkspaceList() {
+            const list = document.getElementById('workspace-list');
+            list.innerHTML = workspaces.map(w => `
+                <div class="workspace-item ${w.id === currentWorkspaceId ? 'active' : ''}" onclick="switchWorkspace('${w.id}')">
+                    <div>
+                        <span class="workspace-name">${w.name}</span>
+                        <span class="workspace-role">${w.role}</span>
+                    </div>
+                </div>
+            `).join('');
+            document.getElementById('workspace-modal').classList.remove('hidden');
+            document.getElementById('workspace-modal').style.display = 'flex';
+        }
+
+        function hideWorkspaceList() {
+            document.getElementById('workspace-modal').classList.add('hidden');
+            document.getElementById('workspace-modal').style.display = 'none';
+        }
+
+        async function switchWorkspace(workspaceId) {
+            currentWorkspaceId = workspaceId;
+            localStorage.setItem('scopedocs_workspace', currentWorkspaceId);
+            hideWorkspaceList();
+            resetIntegrationUI();
+            await loadWorkspaceAndShow();
+        }
+
+        function resetIntegrationUI() {
             selectedRepos = new Set();
             selectedChannels = new Set();
-            localStorage.removeItem('scopedocs_token');
-            document.getElementById('app-logged-out').classList.remove('hidden');
-            document.getElementById('app-logged-in').classList.add('hidden');
 
-            // Reset integration UI
             ['linear', 'github', 'slack'].forEach(p => {
                 document.getElementById(`${p}-badge`).textContent = 'Not Connected';
                 document.getElementById(`${p}-badge`).className = 'not-connected-badge';
@@ -306,7 +557,6 @@
             document.getElementById('github-picker').style.display = 'none';
             document.getElementById('slack-picker').style.display = 'none';
 
-            // Reset stats
             ['stat-issues', 'stat-prs', 'stat-messages', 'stat-links'].forEach(id => {
                 document.getElementById(id).textContent = '0';
             });
@@ -314,8 +564,24 @@
             document.getElementById('context-panel').classList.add('hidden');
         }
 
+        function logout() {
+            token = null;
+            currentUser = null;
+            currentWorkspaceId = null;
+            currentWorkspace = null;
+            workspaces = [];
+            localStorage.removeItem('scopedocs_token');
+            localStorage.removeItem('scopedocs_workspace');
+
+            document.getElementById('app-logged-out').classList.remove('hidden');
+            document.getElementById('app-no-workspace').classList.add('hidden');
+            document.getElementById('app-logged-in').classList.add('hidden');
+
+            resetIntegrationUI();
+        }
+
         function updateIntegrations() {
-            const integrations = currentUser.integrations || [];
+            const integrations = currentWorkspace.integrations || [];
 
             // Linear
             const linear = integrations.find(i => i.provider === 'linear');
@@ -324,9 +590,9 @@
                 document.getElementById('linear-badge').className = 'connected-badge';
                 document.getElementById('linear-connect-btn').textContent = 'Reconnect';
                 document.getElementById('linear-sync').style.display = 'block';
-                const workspace = linear.workspace || {};
+                const info = linear.info || {};
                 document.getElementById('linear-account').style.display = 'block';
-                document.getElementById('linear-account').innerHTML = `Connected as <strong>${workspace.user_name || 'Unknown'}</strong> in <strong>${workspace.org_name || 'Unknown org'}</strong>`;
+                document.getElementById('linear-account').innerHTML = `Connected to <strong>${info.org_name || 'Unknown org'}</strong>`;
             }
 
             // GitHub
@@ -335,9 +601,9 @@
                 document.getElementById('github-badge').textContent = 'Connected';
                 document.getElementById('github-badge').className = 'connected-badge';
                 document.getElementById('github-connect-btn').textContent = 'Reconnect';
-                const workspace = github.workspace || {};
+                const info = github.info || {};
                 document.getElementById('github-account').style.display = 'block';
-                document.getElementById('github-account').innerHTML = `Connected as <strong>@${workspace.user_name || 'Unknown'}</strong> (${workspace.name || ''})`;
+                document.getElementById('github-account').innerHTML = `Connected as <strong>@${info.user_name || 'Unknown'}</strong>`;
                 tryLoadGitHubRepos();
             }
 
@@ -347,16 +613,16 @@
                 document.getElementById('slack-badge').textContent = 'Connected';
                 document.getElementById('slack-badge').className = 'connected-badge';
                 document.getElementById('slack-connect-btn').textContent = 'Reconnect';
-                const workspace = slack.workspace || {};
+                const info = slack.info || {};
                 document.getElementById('slack-account').style.display = 'block';
-                document.getElementById('slack-account').innerHTML = `Connected to <strong>${workspace.team_name || 'Unknown workspace'}</strong>`;
+                document.getElementById('slack-account').innerHTML = `Connected to <strong>${info.team_name || 'Unknown workspace'}</strong>`;
                 tryLoadSlackChannels();
             }
         }
 
         async function tryLoadGitHubRepos() {
             try {
-                const data = await api('/integrations/github/repos');
+                const data = await api(`/workspaces/${currentWorkspaceId}/integrations/github/repos`);
                 document.getElementById('github-picker').style.display = 'block';
                 const list = document.getElementById('github-repos-list');
 
@@ -379,7 +645,7 @@
 
         async function tryLoadSlackChannels() {
             try {
-                const data = await api('/integrations/slack/channels');
+                const data = await api(`/workspaces/${currentWorkspaceId}/integrations/slack/channels`);
                 document.getElementById('slack-picker').style.display = 'block';
                 const list = document.getElementById('slack-channels-list');
 
@@ -437,8 +703,12 @@
         }
 
         async function connectIntegration(provider) {
+            if (!currentWorkspaceId) {
+                showStatus('integration-status', 'Please select a workspace first', 'error');
+                return;
+            }
             try {
-                const data = await api(`/oauth/${provider}/authorize`);
+                const data = await api(`/oauth/${provider}/authorize?workspace_id=${currentWorkspaceId}`);
                 window.location.href = data.authorize_url;
             } catch (e) {
                 showStatus('integration-status', `Error: ${e.message}`, 'error');
@@ -448,7 +718,7 @@
         async function syncProvider(provider) {
             showStatus('integration-status', `Syncing ${provider}...`, 'info');
             try {
-                const data = await api(`/sync/${provider}`, { method: 'POST' });
+                const data = await api(`/workspaces/${currentWorkspaceId}/sync/${provider}`, { method: 'POST' });
                 showStatus('integration-status', `Synced! ${JSON.stringify(data)}`, 'success');
                 loadStats();
             } catch (e) {
@@ -464,7 +734,7 @@
             const repos = Array.from(selectedRepos).join(',');
             showStatus('integration-status', `Syncing ${selectedRepos.size} repos...`, 'info');
             try {
-                const data = await api(`/sync/github?repos=${encodeURIComponent(repos)}`, { method: 'POST' });
+                const data = await api(`/workspaces/${currentWorkspaceId}/sync/github?repos=${encodeURIComponent(repos)}`, { method: 'POST' });
                 showStatus('integration-status', `Synced ${data.github_prs || 0} PRs!`, 'success');
                 loadStats();
             } catch (e) {
@@ -480,7 +750,7 @@
             const channels = Array.from(selectedChannels).join(',');
             showStatus('integration-status', `Syncing ${selectedChannels.size} channels...`, 'info');
             try {
-                const data = await api(`/sync/slack?channels=${encodeURIComponent(channels)}`, { method: 'POST' });
+                const data = await api(`/workspaces/${currentWorkspaceId}/sync/slack?channels=${encodeURIComponent(channels)}`, { method: 'POST' });
                 showStatus('integration-status', `Synced ${data.slack_messages || 0} messages!`, 'success');
                 loadStats();
             } catch (e) {
@@ -489,8 +759,9 @@
         }
 
         async function loadStats() {
+            if (!currentWorkspaceId) return;
             try {
-                const stats = await api('/stats');
+                const stats = await api(`/workspaces/${currentWorkspaceId}/stats`);
                 document.getElementById('stat-issues').textContent = stats.linear_issues || 0;
                 document.getElementById('stat-prs').textContent = stats.github_prs || 0;
                 document.getElementById('stat-messages').textContent = stats.slack_messages || 0;
@@ -501,8 +772,9 @@
         }
 
         async function loadIssues() {
+            if (!currentWorkspaceId) return;
             try {
-                const issues = await api('/issues');
+                const issues = await api(`/workspaces/${currentWorkspaceId}/issues`);
                 const list = document.getElementById('issues-list');
 
                 if (issues.length === 0) {
@@ -514,7 +786,7 @@
                     <div class="issue" onclick="loadContext('${i.identifier}')">
                         <span class="issue-id">${i.identifier}</span>
                         <div class="issue-title">${i.title}</div>
-                        <div class="issue-meta">${i.status || 'No status'} • ${i.team_name || 'No team'}</div>
+                        <div class="issue-meta">${i.status || 'No status'} - ${i.team_name || 'No team'}</div>
                     </div>
                 `).join('');
             } catch (e) {
@@ -523,8 +795,9 @@
         }
 
         async function loadContext(issueId) {
+            if (!currentWorkspaceId) return;
             try {
-                const ctx = await api(`/context/${issueId}`);
+                const ctx = await api(`/workspaces/${currentWorkspaceId}/context/${issueId}`);
                 const panel = document.getElementById('context-panel');
                 panel.classList.remove('hidden');
 
