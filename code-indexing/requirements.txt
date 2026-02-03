@@ -1,0 +1,19 @@
+# Core dependencies
+supabase>=2.0.0
+python-dotenv>=1.0.0
+
+# AST parsing and chunking
+chonkie>=0.4.0
+tree-sitter-language-pack  # Required by Chonkie for language grammars
+openai  # Required by Chonkie internally
+tiktoken  # Token counting
+
+# Test data generation
+faker>=22.0.0
+
+# Testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+
+# Type hints (optional but recommended)
+typing-extensions>=4.0.0
