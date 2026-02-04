@@ -1,0 +1,2085 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ScopeDocs – Integration Tester</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-base: #0a0a0f;
+      --bg-card: #12121a;
+      --bg-card-hover: #181824;
+      --border: #2a2a3a;
+      --text: #e4e4ef;
+      --text-muted: #7a7a8c;
+      --accent-linear: #5e6ad2;
+      --accent-github: #238636;
+      --accent-slack: #e01e5a;
+      --accent-blue: #3b82f6;
+      --success: #22c55e;
+      --error: #ef4444;
+      --warning: #f59e0b;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Outfit', system-ui, sans-serif;
+      background: var(--bg-base);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.6;
+    }
+
+    .noise {
+      position: fixed;
+      inset: 0;
+      background: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      opacity: 0.03;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .gradient-bg {
+      position: fixed;
+      inset: 0;
+      background: 
+        radial-gradient(ellipse 80% 50% at 20% -10%, rgba(94, 106, 210, 0.15), transparent),
+        radial-gradient(ellipse 60% 40% at 80% 100%, rgba(224, 30, 90, 0.1), transparent);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container {
+      position: relative;
+      z-index: 1;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 3rem 1.5rem;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+
+    .logo {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.5rem;
+    }
+
+    .logo-icon {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, var(--accent-linear), var(--accent-slack));
+      border-radius: 8px;
+    }
+
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+
+    .workspace-section {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .section-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin-bottom: 1rem;
+    }
+
+    .workspace-input-group {
+      display: flex;
+      gap: 0.75rem;
+    }
+
+    input[type="text"] {
+      flex: 1;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.875rem;
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    input[type="text"]:focus {
+      border-color: var(--accent-blue);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    }
+
+    input[type="text"]::placeholder {
+      color: var(--text-muted);
+    }
+
+    select {
+      width: 100%;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.875rem;
+      color: var(--text);
+      outline: none;
+      cursor: pointer;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%237a7a8c' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 1rem center;
+      padding-right: 2.5rem;
+    }
+
+    select:focus {
+      border-color: var(--accent-blue);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    }
+
+    select option {
+      background: var(--bg-card);
+      color: var(--text);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.25rem;
+      border: none;
+      border-radius: 8px;
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-decoration: none;
+    }
+
+    .btn-primary {
+      background: var(--accent-blue);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #2563eb;
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .btn-secondary:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--text-muted);
+    }
+
+    .btn-danger {
+      background: transparent;
+      border: 1px solid var(--error);
+      color: var(--error);
+    }
+
+    .btn-danger:hover {
+      background: var(--error);
+      color: white;
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+
+    .integrations-grid {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .integration-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      transition: border-color 0.2s, background 0.2s;
+    }
+
+    .integration-card:hover {
+      background: var(--bg-card-hover);
+    }
+
+    .integration-card.connected {
+      border-color: var(--success);
+    }
+
+    .integration-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .integration-icon.linear {
+      background: rgba(94, 106, 210, 0.15);
+      color: var(--accent-linear);
+    }
+
+    .integration-icon.github {
+      background: rgba(35, 134, 54, 0.15);
+      color: var(--accent-github);
+    }
+
+    .integration-icon.slack {
+      background: rgba(224, 30, 90, 0.15);
+      color: var(--accent-slack);
+    }
+
+    .integration-icon svg {
+      width: 24px;
+      height: 24px;
+    }
+
+    .integration-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .integration-name {
+      font-weight: 600;
+      font-size: 1rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .integration-status {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--text-muted);
+    }
+
+    .status-dot.connected {
+      background: var(--success);
+      box-shadow: 0 0 8px var(--success);
+    }
+
+    .integration-actions {
+      display: flex;
+      gap: 0.5rem;
+      flex-shrink: 0;
+    }
+
+    .sync-section {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-top: 1.5rem;
+    }
+
+    .sync-form {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .form-group {
+      display: grid;
+      gap: 0.5rem;
+    }
+
+    .form-label {
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    .sync-results {
+      margin-top: 1.5rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border);
+    }
+
+    .result-item {
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 0.75rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+    }
+
+    .result-item.success {
+      border-left: 3px solid var(--success);
+    }
+
+    .result-item.error {
+      border-left: 3px solid var(--error);
+    }
+
+    .result-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 0.5rem;
+    }
+
+    .result-source {
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .result-meta {
+      color: var(--text-muted);
+    }
+
+    /* Sync Tabs & Panels */
+    .sync-tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1rem;
+    }
+
+    .sync-tab {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.6rem 1rem;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-muted);
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .sync-tab:hover {
+      background: var(--bg-card-hover);
+      color: var(--text);
+    }
+
+    .sync-tab.active {
+      background: var(--bg-card-hover);
+      border-color: var(--accent-blue);
+      color: var(--text);
+    }
+
+    .tab-icon {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .sync-panel {
+      animation: fadeIn 0.2s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 1rem;
+    }
+
+    .panel-header h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+    }
+
+    .panel-desc {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .selection-list {
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      max-height: 300px;
+      overflow-y: auto;
+      margin-bottom: 1rem;
+    }
+
+    .selection-placeholder {
+      padding: 2rem;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.875rem;
+    }
+
+    .selection-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .selection-item:last-child {
+      border-bottom: none;
+    }
+
+    .selection-item:hover {
+      background: var(--bg-card-hover);
+    }
+
+    .selection-item.selected {
+      background: rgba(59, 130, 246, 0.1);
+    }
+
+    .selection-checkbox {
+      width: 18px;
+      height: 18px;
+      border: 2px solid var(--border);
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: all 0.15s;
+    }
+
+    .selection-item.selected .selection-checkbox {
+      background: var(--accent-blue);
+      border-color: var(--accent-blue);
+    }
+
+    .selection-checkbox svg {
+      width: 12px;
+      height: 12px;
+      stroke: white;
+      stroke-width: 3;
+      opacity: 0;
+    }
+
+    .selection-item.selected .selection-checkbox svg {
+      opacity: 1;
+    }
+
+    .selection-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .selection-name {
+      font-weight: 500;
+      font-size: 0.9rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .selection-meta {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .selection-badge {
+      font-size: 0.7rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      background: var(--bg-card);
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    .sync-actions {
+      display: flex;
+      gap: 1rem;
+      align-items: flex-end;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+    }
+
+    .sync-btn {
+      flex: 1;
+    }
+
+    .sync-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* Team/Project tree */
+    .team-group {
+      border-bottom: 1px solid var(--border);
+    }
+
+    .team-group:last-child {
+      border-bottom: none;
+    }
+
+    .team-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem 1rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .team-header:hover {
+      background: var(--bg-card-hover);
+    }
+
+    .team-header.selected {
+      background: rgba(59, 130, 246, 0.1);
+    }
+
+    .team-projects {
+      padding-left: 2rem;
+      border-top: 1px solid var(--border);
+      background: rgba(0, 0, 0, 0.1);
+    }
+
+    .project-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.6rem 1rem;
+      cursor: pointer;
+      transition: background 0.15s;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .project-item:last-child {
+      border-bottom: none;
+    }
+
+    .project-item:hover {
+      background: var(--bg-card-hover);
+    }
+
+    .project-item.selected {
+      background: rgba(59, 130, 246, 0.1);
+    }
+
+    /* Chunk Viewer */
+    .chunk-card {
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 0.75rem;
+      overflow: hidden;
+    }
+
+    .chunk-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem 1rem;
+      background: rgba(0, 0, 0, 0.2);
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+    }
+
+    .chunk-header:hover {
+      background: var(--bg-card-hover);
+    }
+
+    .chunk-meta {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .chunk-index {
+      font-weight: 600;
+      color: var(--accent-blue);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+    }
+
+    .chunk-lines {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .chunk-expand-icon {
+      color: var(--text-muted);
+      transition: transform 0.2s;
+    }
+
+    .chunk-card.expanded .chunk-expand-icon {
+      transform: rotate(180deg);
+    }
+
+    .chunk-content {
+      display: none;
+      padding: 0;
+      max-height: 400px;
+      overflow: auto;
+    }
+
+    .chunk-card.expanded .chunk-content {
+      display: block;
+    }
+
+    .chunk-code {
+      margin: 0;
+      padding: 1rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      line-height: 1.6;
+      white-space: pre;
+      overflow-x: auto;
+      background: rgba(0, 0, 0, 0.3);
+      color: var(--text);
+    }
+
+    .chunk-loading {
+      padding: 2rem;
+      text-align: center;
+      color: var(--text-muted);
+    }
+
+    .line-number {
+      display: inline-block;
+      width: 3em;
+      text-align: right;
+      padding-right: 1em;
+      color: var(--text-muted);
+      user-select: none;
+      border-right: 1px solid var(--border);
+      margin-right: 1em;
+    }
+
+    .file-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .file-item:last-child {
+      border-bottom: none;
+    }
+
+    .file-item:hover {
+      background: var(--bg-card-hover);
+    }
+
+    .file-item.active {
+      background: rgba(59, 130, 246, 0.15);
+      border-left: 3px solid var(--accent-blue);
+    }
+
+    .file-icon {
+      width: 20px;
+      height: 20px;
+      color: var(--text-muted);
+    }
+
+    .file-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .file-name {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .file-meta {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.5rem;
+      font-size: 0.875rem;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+      opacity: 0;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 100;
+    }
+
+    .toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+
+    .toast.success {
+      border-color: var(--success);
+    }
+
+    .toast.error {
+      border-color: var(--error);
+    }
+
+    .loading {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent-blue);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="noise"></div>
+  <div class="gradient-bg"></div>
+
+  <div class="container">
+    <header>
+      <div class="logo">
+        <div class="logo-icon"></div>
+        ScopeDocs
+      </div>
+      <p class="subtitle">Integration Testing Dashboard</p>
+    </header>
+
+    <!-- Workspace Section -->
+    <section class="workspace-section">
+      <div class="section-title">Workspace</div>
+      
+      <!-- Existing workspaces dropdown -->
+      <div class="workspace-selector" id="workspace-selector">
+        <select id="workspace-select" onchange="onWorkspaceSelect()">
+          <option value="">Loading workspaces...</option>
+        </select>
+      </div>
+      
+      <!-- Create new workspace form (hidden by default) -->
+      <div class="create-workspace-form hidden" id="create-workspace-form">
+        <div class="workspace-input-group" style="margin-bottom: 0.75rem;">
+          <input 
+            type="text" 
+            id="new-workspace-name" 
+            placeholder="Workspace name (e.g., My Team)"
+          >
+        </div>
+        <div class="workspace-input-group">
+          <input 
+            type="text" 
+            id="new-workspace-slug" 
+            placeholder="Slug (optional, e.g., my-team)"
+          >
+          <button class="btn btn-primary" onclick="createWorkspace()">Create</button>
+          <button class="btn btn-secondary" onclick="toggleCreateForm()">Cancel</button>
+        </div>
+      </div>
+      
+      <!-- Current workspace info -->
+      <div class="current-workspace hidden" id="current-workspace">
+        <div style="display: flex; align-items: center; gap: 0.75rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+          <div style="flex: 1;">
+            <div style="font-weight: 600;" id="current-workspace-name">-</div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace;" id="current-workspace-id">-</div>
+          </div>
+          <button class="btn btn-secondary" onclick="checkStatus()">Refresh Status</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Integrations -->
+    <section>
+      <div class="section-title" style="padding: 0 0.5rem; margin-bottom: 1rem;">Integrations</div>
+      <div class="integrations-grid">
+        <!-- Linear -->
+        <div class="integration-card" id="linear-card">
+          <div class="integration-icon linear">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M3.18 13.54l7.28 7.28c.2.2.51.2.71 0l9.54-9.54c.2-.2.2-.51 0-.71l-7.28-7.28c-.2-.2-.51-.2-.71 0L3.18 12.83c-.2.2-.2.51 0 .71zm5.66-2.83l4.24 4.24"/>
+            </svg>
+          </div>
+          <div class="integration-info">
+            <div class="integration-name">Linear</div>
+            <div class="integration-status">
+              <span class="status-dot" id="linear-dot"></span>
+              <span id="linear-status">Not connected</span>
+            </div>
+          </div>
+          <div class="integration-actions">
+            <button class="btn btn-secondary" id="linear-connect" onclick="connect('linear')">Connect</button>
+            <button class="btn btn-danger hidden" id="linear-disconnect" onclick="disconnect('linear')">Disconnect</button>
+          </div>
+        </div>
+
+        <!-- GitHub -->
+        <div class="integration-card" id="github-card">
+          <div class="integration-icon github">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+            </svg>
+          </div>
+          <div class="integration-info">
+            <div class="integration-name">GitHub</div>
+            <div class="integration-status">
+              <span class="status-dot" id="github-dot"></span>
+              <span id="github-status">Not connected</span>
+            </div>
+          </div>
+          <div class="integration-actions">
+            <button class="btn btn-secondary" id="github-connect" onclick="connect('github')">Connect</button>
+            <button class="btn btn-danger hidden" id="github-disconnect" onclick="disconnect('github')">Disconnect</button>
+          </div>
+        </div>
+
+        <!-- Slack -->
+        <div class="integration-card" id="slack-card">
+          <div class="integration-icon slack">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/>
+            </svg>
+          </div>
+          <div class="integration-info">
+            <div class="integration-name">Slack</div>
+            <div class="integration-status">
+              <span class="status-dot" id="slack-dot"></span>
+              <span id="slack-status">Not connected</span>
+            </div>
+          </div>
+          <div class="integration-actions">
+            <button class="btn btn-secondary" id="slack-connect" onclick="connect('slack')">Connect</button>
+            <button class="btn btn-danger hidden" id="slack-disconnect" onclick="disconnect('slack')">Disconnect</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Code Indexing Section -->
+    <section class="sync-section" id="indexing-section">
+      <div class="section-title">Code Indexing</div>
+      
+      <div class="form-group">
+        <label class="form-label">Select Repository to Index</label>
+        <div style="display: flex; gap: 0.75rem;">
+          <select id="repo-select" style="flex: 1;">
+            <option value="">Connect GitHub to see repos...</option>
+          </select>
+          <button class="btn btn-secondary" onclick="loadGitHubRepos()">Refresh</button>
+        </div>
+      </div>
+      
+      <div id="selected-repo-info" class="hidden" style="margin-top: 1rem; padding: 1rem; background: var(--bg-base); border-radius: 8px; border: 1px solid var(--border);">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div style="font-weight: 600;" id="selected-repo-name">-</div>
+            <div style="font-size: 0.8rem; color: var(--text-muted);" id="selected-repo-desc">-</div>
+          </div>
+          <button class="btn btn-primary" onclick="indexSelectedRepo()">
+            Index Repository
+          </button>
+        </div>
+      </div>
+      
+      <div id="indexing-results" class="hidden" style="margin-top: 1rem;">
+        <div class="section-title">Indexing Results</div>
+        <div id="indexing-results-container"></div>
+      </div>
+      
+      <div id="index-stats" class="hidden" style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+        <div class="section-title">Index Stats</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+          <div style="padding: 1rem; background: var(--bg-base); border-radius: 8px; text-align: center;">
+            <div style="font-size: 2rem; font-weight: 700; color: var(--accent-blue);" id="stat-files">0</div>
+            <div style="font-size: 0.8rem; color: var(--text-muted);">Files Indexed</div>
+          </div>
+          <div style="padding: 1rem; background: var(--bg-base); border-radius: 8px; text-align: center;">
+            <div style="font-size: 2rem; font-weight: 700; color: var(--accent-github);" id="stat-chunks">0</div>
+            <div style="font-size: 0.8rem; color: var(--text-muted);">Code Chunks</div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Chunk Viewer -->
+      <div id="chunk-viewer" class="hidden" style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+          <div class="section-title" style="margin-bottom: 0;">Chunk Viewer</div>
+          <button class="btn btn-secondary" onclick="loadIndexedFiles()">Load Files</button>
+        </div>
+        
+        <div id="indexed-files-list" class="selection-list" style="max-height: 200px;">
+          <div class="selection-placeholder">Click "Load Files" to see indexed files</div>
+        </div>
+        
+        <div id="file-chunks" class="hidden" style="margin-top: 1rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+            <div class="section-title" style="margin-bottom: 0;">Chunks in <span id="viewing-file-name" style="color: var(--accent-blue);">-</span></div>
+            <span style="font-size: 0.8rem; color: var(--text-muted);" id="chunk-count-label">0 chunks</span>
+          </div>
+          <div id="chunks-container"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Data Sync Section -->
+    <section class="sync-section">
+      <div class="section-title">Data Sync</div>
+      
+      <!-- Sync Tabs -->
+      <div class="sync-tabs">
+        <button class="sync-tab active" data-tab="slack" onclick="switchSyncTab('slack')">
+          <span class="tab-icon" style="background: var(--accent-slack);"></span>
+          Slack Messages
+        </button>
+        <button class="sync-tab" data-tab="linear" onclick="switchSyncTab('linear')">
+          <span class="tab-icon" style="background: var(--accent-linear);"></span>
+          Linear Issues
+        </button>
+        <button class="sync-tab" data-tab="github" onclick="switchSyncTab('github')">
+          <span class="tab-icon" style="background: var(--accent-github);"></span>
+          GitHub PRs
+        </button>
+      </div>
+      
+      <!-- Slack Panel -->
+      <div class="sync-panel" id="panel-slack">
+        <div class="panel-header">
+          <div>
+            <h3>Select Slack Channels</h3>
+            <p class="panel-desc">Choose channels to sync messages from</p>
+          </div>
+          <button class="btn btn-secondary" onclick="loadSlackChannels()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path d="M9 12l2 2 4-4"/></svg>
+            Load Channels
+          </button>
+        </div>
+        
+        <div class="selection-list" id="slack-channel-list">
+          <div class="selection-placeholder">Click "Load Channels" to fetch available Slack channels</div>
+        </div>
+        
+        <div class="sync-actions">
+          <div class="form-group" style="flex: 0 0 150px;">
+            <label class="form-label">Lookback Days</label>
+            <input type="number" id="slack-lookback" value="7" min="1" max="90" style="width: 100%;">
+          </div>
+          <button class="btn btn-primary sync-btn" onclick="syncSlackMessages()" disabled id="sync-slack-btn">
+            Sync Selected Channels
+          </button>
+        </div>
+      </div>
+      
+      <!-- Linear Panel -->
+      <div class="sync-panel hidden" id="panel-linear">
+        <div class="panel-header">
+          <div>
+            <h3>Select Linear Teams & Projects</h3>
+            <p class="panel-desc">Choose teams or projects to sync issues from</p>
+          </div>
+          <button class="btn btn-secondary" onclick="loadLinearTeams()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path d="M9 12l2 2 4-4"/></svg>
+            Load Teams
+          </button>
+        </div>
+        
+        <div class="selection-list" id="linear-team-list">
+          <div class="selection-placeholder">Click "Load Teams" to fetch available Linear teams</div>
+        </div>
+        
+        <div class="sync-actions">
+          <div class="form-group" style="flex: 0 0 150px;">
+            <label class="form-label">Lookback Days</label>
+            <input type="number" id="linear-lookback" value="30" min="1" max="365" style="width: 100%;">
+          </div>
+          <button class="btn btn-primary sync-btn" onclick="syncLinearIssues()" disabled id="sync-linear-btn">
+            Sync Selected Issues
+          </button>
+        </div>
+      </div>
+      
+      <!-- GitHub Panel -->
+      <div class="sync-panel hidden" id="panel-github">
+        <div class="panel-header">
+          <div>
+            <h3>Select GitHub Repos for PR Sync</h3>
+            <p class="panel-desc">Choose repos to sync pull requests from</p>
+          </div>
+          <button class="btn btn-secondary" onclick="loadGitHubReposForSync()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path d="M9 12l2 2 4-4"/></svg>
+            Load Repos
+          </button>
+        </div>
+        
+        <div class="selection-list" id="github-repo-list">
+          <div class="selection-placeholder">Click "Load Repos" to fetch available GitHub repos</div>
+        </div>
+        
+        <div class="sync-actions">
+          <div class="form-group" style="flex: 0 0 150px;">
+            <label class="form-label">Lookback Days</label>
+            <input type="number" id="github-lookback" value="30" min="1" max="365" style="width: 100%;">
+          </div>
+          <button class="btn btn-primary sync-btn" onclick="syncGitHubPRs()" disabled id="sync-github-btn">
+            Sync Selected PRs
+          </button>
+        </div>
+      </div>
+      
+      <!-- Sync Results -->
+      <div class="sync-results hidden" id="sync-results">
+        <div class="section-title">Sync Results</div>
+        <div id="results-container"></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const API_BASE = window.location.origin;
+    let currentWorkspaceId = null;
+    let workspaces = [];
+
+    function getWorkspaceId() {
+      return currentWorkspaceId;
+    }
+
+    function showToast(message, type = 'info') {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.className = 'toast show ' + type;
+      setTimeout(() => toast.className = 'toast', 3000);
+    }
+
+    // ==========================================================================
+    // Workspace Management
+    // ==========================================================================
+
+    async function loadWorkspaces() {
+      try {
+        const response = await fetch(`${API_BASE}/api/workspaces`);
+        if (!response.ok) throw new Error('Failed to load workspaces');
+        
+        const data = await response.json();
+        workspaces = data.workspaces || [];
+        renderWorkspaceSelect();
+      } catch (error) {
+        console.error('Error loading workspaces:', error);
+        renderWorkspaceSelect();
+      }
+    }
+
+    function renderWorkspaceSelect() {
+      const select = document.getElementById('workspace-select');
+      
+      if (workspaces.length === 0) {
+        select.innerHTML = `
+          <option value="">No workspaces yet</option>
+          <option value="__create__">+ Create new workspace</option>
+        `;
+      } else {
+        select.innerHTML = `
+          <option value="">Select a workspace...</option>
+          ${workspaces.map(w => `<option value="${w.id}">${w.name}</option>`).join('')}
+          <option value="__create__">+ Create new workspace</option>
+        `;
+      }
+
+      // If workspace ID is in URL hash, select it
+      if (window.location.hash) {
+        const hashId = window.location.hash.slice(1);
+        const found = workspaces.find(w => w.id === hashId);
+        if (found) {
+          select.value = hashId;
+          onWorkspaceSelect();
+        }
+      }
+    }
+
+    function onWorkspaceSelect() {
+      const select = document.getElementById('workspace-select');
+      const value = select.value;
+      
+      if (value === '__create__') {
+        toggleCreateForm(true);
+        select.value = '';
+        return;
+      }
+      
+      if (!value) {
+        currentWorkspaceId = null;
+        document.getElementById('current-workspace').classList.add('hidden');
+        resetIntegrationStatus();
+        return;
+      }
+
+      currentWorkspaceId = value;
+      const workspace = workspaces.find(w => w.id === value);
+      
+      if (workspace) {
+        document.getElementById('current-workspace-name').textContent = workspace.name;
+        document.getElementById('current-workspace-id').textContent = workspace.id;
+        document.getElementById('current-workspace').classList.remove('hidden');
+        
+        // Update URL hash for bookmarking
+        window.location.hash = workspace.id;
+        
+        // Load integration status
+        checkStatus();
+      }
+    }
+
+    function toggleCreateForm(show) {
+      const form = document.getElementById('create-workspace-form');
+      const selector = document.getElementById('workspace-selector');
+      
+      if (show === undefined) {
+        show = form.classList.contains('hidden');
+      }
+      
+      if (show) {
+        form.classList.remove('hidden');
+        selector.classList.add('hidden');
+        document.getElementById('new-workspace-name').focus();
+      } else {
+        form.classList.add('hidden');
+        selector.classList.remove('hidden');
+        document.getElementById('new-workspace-name').value = '';
+        document.getElementById('new-workspace-slug').value = '';
+      }
+    }
+
+    async function createWorkspace() {
+      const name = document.getElementById('new-workspace-name').value.trim();
+      const slug = document.getElementById('new-workspace-slug').value.trim();
+      
+      if (!name) {
+        showToast('Please enter a workspace name', 'error');
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API_BASE}/api/workspaces`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, slug })
+        });
+
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.detail || 'Failed to create workspace');
+        }
+
+        showToast(`Workspace "${data.name}" created!`, 'success');
+        
+        // Add to local list and select it
+        workspaces.unshift(data);
+        renderWorkspaceSelect();
+        
+        // Hide form and select the new workspace
+        toggleCreateForm(false);
+        document.getElementById('workspace-select').value = data.id;
+        onWorkspaceSelect();
+        
+      } catch (error) {
+        showToast('Error: ' + error.message, 'error');
+      }
+    }
+
+    function resetIntegrationStatus() {
+      ['linear', 'github', 'slack'].forEach(provider => {
+        updateIntegrationUI(provider, false);
+      });
+    }
+
+    // ==========================================================================
+    // Integration Status
+    // ==========================================================================
+
+    function updateIntegrationUI(provider, connected) {
+      const card = document.getElementById(`${provider}-card`);
+      const dot = document.getElementById(`${provider}-dot`);
+      const status = document.getElementById(`${provider}-status`);
+      const connectBtn = document.getElementById(`${provider}-connect`);
+      const disconnectBtn = document.getElementById(`${provider}-disconnect`);
+
+      if (connected) {
+        card.classList.add('connected');
+        dot.classList.add('connected');
+        status.textContent = 'Connected';
+        connectBtn.classList.add('hidden');
+        disconnectBtn.classList.remove('hidden');
+      } else {
+        card.classList.remove('connected');
+        dot.classList.remove('connected');
+        status.textContent = 'Not connected';
+        connectBtn.classList.remove('hidden');
+        disconnectBtn.classList.add('hidden');
+      }
+    }
+
+    async function checkStatus() {
+      const workspaceId = getWorkspaceId();
+      if (!workspaceId) {
+        showToast('Please select a workspace first', 'error');
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API_BASE}/api/oauth/status/${workspaceId}`);
+        if (!response.ok) throw new Error('Failed to fetch status');
+        
+        const data = await response.json();
+        updateIntegrationUI('linear', data.linear);
+        updateIntegrationUI('github', data.github);
+        updateIntegrationUI('slack', data.slack);
+        
+        // If GitHub is connected, load repos
+        if (data.github) {
+          loadGitHubRepos();
+        } else {
+          document.getElementById('repo-select').innerHTML = '<option value="">Connect GitHub to see repos...</option>';
+        }
+        
+        showToast('Status loaded', 'success');
+      } catch (error) {
+        showToast('Error: ' + error.message, 'error');
+      }
+    }
+
+    function connect(provider) {
+      const workspaceId = getWorkspaceId();
+      if (!workspaceId) {
+        showToast('Please select a workspace first', 'error');
+        return;
+      }
+
+      // Redirect to OAuth flow
+      window.location.href = `${API_BASE}/api/oauth/${provider}/connect?workspace_id=${workspaceId}`;
+    }
+
+    async function disconnect(provider) {
+      const workspaceId = getWorkspaceId();
+      if (!workspaceId) {
+        showToast('Please select a workspace first', 'error');
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `${API_BASE}/api/oauth/${provider}/disconnect?workspace_id=${workspaceId}`,
+          { method: 'DELETE' }
+        );
+        
+        if (!response.ok) throw new Error('Failed to disconnect');
+        
+        updateIntegrationUI(provider, false);
+        showToast(`${provider} disconnected`, 'success');
+      } catch (error) {
+        showToast('Error: ' + error.message, 'error');
+      }
+    }
+
+    // ==========================================================================
+    // Data Sync - Selection UI
+    // ==========================================================================
+
+    // State for selections
+    let selectedSlackChannels = new Set();
+    let selectedLinearTeams = new Set();
+    let selectedLinearProjects = new Set();
+    let selectedGitHubRepos = new Set();
+    
+    // Loaded data
+    let slackChannels = [];
+    let linearTeams = [];
+    let syncGitHubRepos = [];
+
+    function switchSyncTab(tab) {
+      // Update tab buttons
+      document.querySelectorAll('.sync-tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.tab === tab);
+      });
+      
+      // Update panels
+      document.querySelectorAll('.sync-panel').forEach(p => {
+        p.classList.toggle('hidden', p.id !== `panel-${tab}`);
+      });
+    }
+
+    // Render selection items with checkboxes
+    function renderSelectionItem(id, name, meta, selected, extraBadge = '') {
+      return `
+        <div class="selection-item ${selected ? 'selected' : ''}" data-id="${id}" onclick="toggleSelection(this)">
+          <div class="selection-checkbox">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="20,6 9,17 4,12"></polyline></svg>
+          </div>
+          <div class="selection-info">
+            <div class="selection-name">${name}</div>
+            <div class="selection-meta">${meta}</div>
+          </div>
+          ${extraBadge ? `<span class="selection-badge">${extraBadge}</span>` : ''}
+        </div>
+      `;
+    }
+
+    function toggleSelection(el) {
+      el.classList.toggle('selected');
+      updateSyncButtonState();
+    }
+
+    function updateSyncButtonState() {
+      // Slack
+      const slackSelected = document.querySelectorAll('#slack-channel-list .selection-item.selected').length;
+      document.getElementById('sync-slack-btn').disabled = slackSelected === 0;
+      
+      // Linear
+      const linearSelected = document.querySelectorAll('#linear-team-list .team-header.selected, #linear-team-list .project-item.selected').length;
+      document.getElementById('sync-linear-btn').disabled = linearSelected === 0;
+      
+      // GitHub
+      const githubSelected = document.querySelectorAll('#github-repo-list .selection-item.selected').length;
+      document.getElementById('sync-github-btn').disabled = githubSelected === 0;
+    }
+
+    // ==========================================================================
+    // Slack Channels
+    // ==========================================================================
+
+    async function loadSlackChannels() {
+      const workspaceId = getWorkspaceId();
+      if (!workspaceId) {
+        showToast('Please select a workspace first', 'error');
+        return;
+      }
+
+      const list = document.getElementById('slack-channel-list');
+      list.innerHTML = '<div class="selection-placeholder">Loading channels...</div>';
+
+      try {
+        const response = await fetch(`${API_BASE}/api/slack/channels/${workspaceId}`);
+        
+        if (response.status === 404) {
+          list.innerHTML = '<div class="selection-placeholder">Connect Slack first to load channels</div>';
+          return;
+        }
+        
+        if (!response.ok) throw new Error('Failed to fetch channels');
+        
+        const data = await response.json();
+        slackChannels = data.channels || [];
+        
+        if (slackChannels.length === 0) {
+          list.innerHTML = '<div class="selection-placeholder">No channels found</div>';
+        } else {
+          list.innerHTML = slackChannels.map(ch => 
+            renderSelectionItem(
+              ch.id,
+              `#${ch.name}`,
+              ch.purpose || ch.topic || `${ch.num_members} members`,
+              false,
+              ch.is_private ? '🔒 Private' : ''
+            )
+          ).join('');
+        }
+        
+        showToast(`Loaded ${slackChannels.length} channels`, 'success');
+        updateSyncButtonState();
+        
+      } catch (error) {
+        list.innerHTML = `<div class="selection-placeholder" style="color: var(--error);">Error: ${error.message}</div>`;
+        showToast('Error: ' + error.message, 'error');
+      }
+    }
+
+    async function syncSlackMessages() {
+      const workspaceId = getWorkspaceId();
+      const selectedItems = document.querySelectorAll('#slack-channel-list .selection-item.selected');
+      const channelIds = Array.from(selectedItems).map(el => el.dataset.id);
+      const lookbackDays = parseInt(document.getElementById('slack-lookback').value) || 7;
+
+      if (channelIds.length === 0) {
+        showToast('Please select at least one channel', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('sync-slack-btn');
+      btn.textContent = 'Syncing...';
+      btn.disabled = true;
+
+      try {
+        const response = await fetch(`${API_BASE}/api/data/sync/slack-messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspace_id: workspaceId,
+            channel_ids: channelIds,
+            lookback_days: lookbackDays
+          })
+        });
+
+        const data = await response.json();
+        
+        if (!response.ok) throw new Error(data.detail || 'Sync failed');
+        
+        displaySyncResults('Slack Messages', data.stats);
+        showToast(`Synced ${data.stats.messages_synced} messages from ${data.stats.channels_synced} channels`, 'success');
+        
+      } catch (error) {
+        showToast('Error: ' + error.message, 'error');
+      } finally {
+        btn.textContent = 'Sync Selected Channels';
+        updateSyncButtonState();
+      }
+    }
+
+    // ==========================================================================
+    // Linear Teams & Projects
+    // ==========================================================================
+
+    async function loadLinearTeams() {
+      const workspaceId = getWorkspaceId();
+      if (!workspaceId) {
+        showToast('Please select a workspace first', 'error');
+        return;
+      }
+
+      const list = document.getElementById('linear-team-list');
+      list.innerHTML = '<div class="selection-placeholder">Loading teams...</div>';
+
+      try {
+        const response = await fetch(`${API_BASE}/api/linear/teams/${workspaceId}`);
+        
+        if (response.status === 404) {
+          list.innerHTML = '<div class="selection-placeholder">Connect Linear first to load teams</div>';
+          return;
+        }
+        
+        if (!response.ok) throw new Error('Failed to fetch teams');
+        
+        const data = await response.json();
+        linearTeams = data.teams || [];
+        
+        if (linearTeams.length === 0) {
+          list.innerHTML = '<div class="selection-placeholder">No teams found</div>';
+        } else {
+          list.innerHTML = linearTeams.map(team => `
+            <div class="team-group" data-team-id="${team.id}">
+              <div class="team-header" data-id="${team.id}" onclick="toggleTeamSelection(this)">
+                <div class="selection-checkbox">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="20,6 9,17 4,12"></polyline></svg>
+                </div>
+                <div class="selection-info">
+                  <div class="selection-name">${team.name}</div>
+                  <div class="selection-meta">${team.key} • ${team.projects.length} projects</div>
+                </div>
+                <span class="selection-badge">Team</span>
+              </div>
+              ${team.projects.length > 0 ? `
+                <div class="team-projects">
+                  ${team.projects.map(p => `
+                    <div class="project-item" data-id="${p.id}" data-team="${team.id}" onclick="toggleProjectSelection(this, event)">
+                      <div class="selection-checkbox">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="20,6 9,17 4,12"></polyline></svg>
+                      </div>
+                      <div class="selection-info">
+                        <div class="selection-name">${p.name}</div>
+                        <div class="selection-meta">${p.state || 'Active'}</div>
+                      </div>
+                    </div>
+                  `).join('')}
+                </div>
+              ` : ''}
+            </div>
+          `).join('');
+        }
+        
+        showToast(`Loaded ${linearTeams.length} teams`, 'success');
+        updateSyncButtonState();
+        
+      } catch (error) {
+        list.innerHTML = `<div class="selection-placeholder" style="color: var(--error);">Error: ${error.message}</div>`;
+        showToast('Error: ' + error.message, 'error');
+      }
+    }
+
+    function toggleTeamSelection(el) {
+      el.classList.toggle('selected');
+      // If team is selected, also select all its projects
+      const teamGroup = el.closest('.team-group');
+      const isSelected = el.classList.contains('selected');
+      teamGroup.querySelectorAll('.project-item').forEach(p => {
+        p.classList.toggle('selected', isSelected);
+      });
+      updateSyncButtonState();
+    }
+
+    function toggleProjectSelection(el, event) {
+      event.stopPropagation();
+      el.classList.toggle('selected');
+      updateSyncButtonState();
+    }
+
+    async function syncLinearIssues() {
+      const workspaceId = getWorkspaceId();
+      const selectedTeams = document.querySelectorAll('#linear-team-list .team-header.selected');
+      const selectedProjects = document.querySelectorAll('#linear-team-list .project-item.selected');
+      
+      const teamIds = Array.from(selectedTeams).map(el => el.dataset.id);
+      const projectIds = Array.from(selectedProjects).map(el => el.dataset.id);
+      const lookbackDays = parseInt(document.getElementById('linear-lookback').value) || 30;
+
+      if (teamIds.length === 0 && projectIds.length === 0) {
+        showToast('Please select at least one team or project', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('sync-linear-btn');
+      btn.textContent = 'Syncing...';
+      btn.disabled = true;
+
+      try {
+        const response = await fetch(`${API_BASE}/api/data/sync/linear-issues`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspace_id: workspaceId,
+            team_ids: teamIds,
+            project_ids: projectIds,
+            lookback_days: lookbackDays
+          })
+        });
+
+        const data = await response.json();
+        
+        if (!response.ok) throw new Error(data.detail || 'Sync failed');
+        
+        displaySyncResults('Linear Issues', data.stats);
+        showToast(`Synced ${data.stats.issues_synced} issues`, 'success');
+        
+      } catch (error) {
+        showToast('Error: ' + error.message, 'error');
+      } finally {
+        btn.textContent = 'Sync Selected Issues';
+        updateSyncButtonState();
+      }
+    }
+
+    // ==========================================================================
+    // GitHub PRs
+    // ==========================================================================
+
+    async function loadGitHubReposForSync() {
+      const workspaceId = getWorkspaceId();
+      if (!workspaceId) {
+        showToast('Please select a workspace first', 'error');
+        return;
+      }
+
+      const list = document.getElementById('github-repo-list');
+      list.innerHTML = '<div class="selection-placeholder">Loading repos...</div>';
+
+      try {
+        const response = await fetch(`${API_BASE}/api/github/repos/${workspaceId}`);
+        
+        if (response.status === 404) {
+          list.innerHTML = '<div class="selection-placeholder">Connect GitHub first to load repos</div>';
+          return;
+        }
+        
+        if (!response.ok) throw new Error('Failed to fetch repos');
+        
+        const data = await response.json();
+        syncGitHubRepos = data.repos || [];
+        
+        if (syncGitHubRepos.length === 0) {
+          list.innerHTML = '<div class="selection-placeholder">No repos found</div>';
+        } else {
+          list.innerHTML = syncGitHubRepos.map(repo => 
+            renderSelectionItem(
+              repo.full_name,
+              repo.full_name,
+              repo.description || `${repo.language || 'Unknown'} • Updated ${new Date(repo.updated_at).toLocaleDateString()}`,
+              false,
+              repo.private ? '🔒' : ''
+            )
+          ).join('');
+        }
+        
+        showToast(`Loaded ${syncGitHubRepos.length} repos`, 'success');
+        updateSyncButtonState();
+        
+      } catch (error) {
+        list.innerHTML = `<div class="selection-placeholder" style="color: var(--error);">Error: ${error.message}</div>`;
+        showToast('Error: ' + error.message, 'error');
+      }
+    }
+
+    async function syncGitHubPRs() {
+      const workspaceId = getWorkspaceId();
+      const selectedItems = document.querySelectorAll('#github-repo-list .selection-item.selected');
+      const repos = Array.from(selectedItems).map(el => el.dataset.id);
+      const lookbackDays = parseInt(document.getElementById('github-lookback').value) || 30;
+
+      if (repos.length === 0) {
+        showToast('Please select at least one repo', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('sync-github-btn');
+      btn.textContent = 'Syncing...';
+      btn.disabled = true;
+
+      try {
+        const response = await fetch(`${API_BASE}/api/data/sync/github-prs`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspace_id: workspaceId,
+            repos: repos,
+            lookback_days: lookbackDays
+          })
+        });
+
+        const data = await response.json();
+        
+        if (!response.ok) throw new Error(data.detail || 'Sync failed');
+        
+        displaySyncResults('GitHub PRs', data.stats);
+        showToast(`Synced ${data.stats.prs_synced} PRs from ${data.stats.repos_synced} repos`, 'success');
+        
+      } catch (error) {
+        showToast('Error: ' + error.message, 'error');
+      } finally {
+        btn.textContent = 'Sync Selected PRs';
+        updateSyncButtonState();
+      }
+    }
+
+    // ==========================================================================
+    // Sync Results Display
+    // ==========================================================================
+
+    function displaySyncResults(source, stats) {
+      const container = document.getElementById('results-container');
+      const section = document.getElementById('sync-results');
+      
+      const hasErrors = stats.errors && stats.errors.length > 0;
+      
+      container.innerHTML = `
+        <div class="result-item ${hasErrors ? 'error' : 'success'}">
+          <div class="result-header">
+            <span class="result-source">${source}</span>
+            <span class="result-meta">${JSON.stringify(stats).replace(/"errors":\[.*?\],?/g, '')}</span>
+          </div>
+          ${hasErrors ? `
+            <div style="margin-top: 0.5rem; color: var(--error); font-size: 0.8rem;">
+              Errors: ${stats.errors.slice(0, 3).join(', ')}${stats.errors.length > 3 ? ` (+${stats.errors.length - 3} more)` : ''}
+            </div>
+          ` : ''}
+        </div>
+      `;
+      
+      section.classList.remove('hidden');
+    }
+
+    // ==========================================================================
+    // GitHub Repos & Code Indexing
+    // ==========================================================================
+    
+    let githubRepos = [];
+
+    async function loadGitHubRepos() {
+      const workspaceId = getWorkspaceId();
+      if (!workspaceId) {
+        showToast('Please select a workspace first', 'error');
+        return;
+      }
+
+      const select = document.getElementById('repo-select');
+      select.innerHTML = '<option value="">Loading repos...</option>';
+
+      try {
+        const response = await fetch(`${API_BASE}/api/github/repos/${workspaceId}`);
+        
+        if (response.status === 404) {
+          select.innerHTML = '<option value="">Connect GitHub first</option>';
+          return;
+        }
+        
+        if (!response.ok) throw new Error('Failed to fetch repos');
+        
+        const data = await response.json();
+        githubRepos = data.repos || [];
+        
+        if (githubRepos.length === 0) {
+          select.innerHTML = '<option value="">No repos found</option>';
+        } else {
+          select.innerHTML = `
+            <option value="">Select a repository (${githubRepos.length} available)...</option>
+            ${githubRepos.map(r => `
+              <option value="${r.full_name}" data-desc="${r.description || ''}" data-lang="${r.language || ''}">
+                ${r.full_name} ${r.private ? '🔒' : ''} ${r.language ? `(${r.language})` : ''}
+              </option>
+            `).join('')}
+          `;
+        }
+        
+        showToast(`Loaded ${githubRepos.length} repos`, 'success');
+        
+        // Also load index stats
+        loadIndexStats();
+        
+      } catch (error) {
+        select.innerHTML = '<option value="">Error loading repos</option>';
+        showToast('Error: ' + error.message, 'error');
+      }
+    }
+
+    document.getElementById('repo-select').addEventListener('change', function() {
+      const selected = this.value;
+      const infoDiv = document.getElementById('selected-repo-info');
+      
+      if (!selected) {
+        infoDiv.classList.add('hidden');
+        return;
+      }
+      
+      const repo = githubRepos.find(r => r.full_name === selected);
+      if (repo) {
+        document.getElementById('selected-repo-name').textContent = repo.full_name;
+        document.getElementById('selected-repo-desc').textContent = 
+          repo.description || `${repo.language || 'Unknown'} • Updated ${new Date(repo.updated_at).toLocaleDateString()}`;
+        infoDiv.classList.remove('hidden');
+      }
+    });
+
+    async function indexSelectedRepo() {
+      const workspaceId = getWorkspaceId();
+      const repoSelect = document.getElementById('repo-select');
+      const repoFullName = repoSelect.value;
+      
+      if (!workspaceId || !repoFullName) {
+        showToast('Please select a repository first', 'error');
+        return;
+      }
+
+      const btn = document.querySelector('#selected-repo-info button');
+      const originalText = btn.textContent;
+      btn.textContent = 'Indexing...';
+      btn.disabled = true;
+
+      try {
+        const response = await fetch(`${API_BASE}/api/index/repo`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspace_id: workspaceId,
+            repo_full_name: repoFullName
+          })
+        });
+
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.detail || 'Indexing failed');
+        }
+
+        // Display results
+        const resultsContainer = document.getElementById('indexing-results-container');
+        const resultsSection = document.getElementById('indexing-results');
+        
+        resultsContainer.innerHTML = `
+          <div class="result-item success">
+            <div class="result-header">
+              <span class="result-source">${data.repo}</span>
+              <span class="result-meta">Branch: ${data.branch}</span>
+            </div>
+            <div style="margin-top: 0.5rem;">
+              <strong>${data.stats.files_indexed}</strong> files indexed, 
+              <strong>${data.stats.chunks_created}</strong> chunks created
+            </div>
+            ${data.stats.errors.length ? `
+              <div style="color: var(--error); margin-top: 0.5rem;">
+                Errors: ${data.stats.errors.slice(0, 3).join(', ')}
+                ${data.stats.errors.length > 3 ? `... and ${data.stats.errors.length - 3} more` : ''}
+              </div>
+            ` : ''}
+          </div>
+        `;
+        resultsSection.classList.remove('hidden');
+        
+        showToast(`Indexed ${data.stats.files_indexed} files!`, 'success');
+        
+        // Refresh stats
+        loadIndexStats();
+        
+      } catch (error) {
+        showToast('Error: ' + error.message, 'error');
+      } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
+      }
+    }
+
+    async function loadIndexStats() {
+      const workspaceId = getWorkspaceId();
+      if (!workspaceId) return;
+
+      try {
+        const response = await fetch(`${API_BASE}/api/index/stats/${workspaceId}`);
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        
+        document.getElementById('stat-files').textContent = data.total_files;
+        document.getElementById('stat-chunks').textContent = data.total_chunks;
+        document.getElementById('index-stats').classList.remove('hidden');
+        
+        // Show chunk viewer if there are chunks
+        if (data.total_chunks > 0) {
+          document.getElementById('chunk-viewer').classList.remove('hidden');
+        }
+        
+      } catch (error) {
+        console.error('Failed to load index stats:', error);
+      }
+    }
+
+    // ==========================================================================
+    // Chunk Viewer
+    // ==========================================================================
+    
+    let indexedFiles = [];
+    let currentViewingRepo = null;
+
+    async function loadIndexedFiles() {
+      const workspaceId = getWorkspaceId();
+      if (!workspaceId) {
+        showToast('Please select a workspace first', 'error');
+        return;
+      }
+
+      const list = document.getElementById('indexed-files-list');
+      list.innerHTML = '<div class="selection-placeholder">Loading indexed files...</div>';
+
+      try {
+        const response = await fetch(`${API_BASE}/api/index/files/${workspaceId}`);
+        
+        if (!response.ok) throw new Error('Failed to fetch files');
+        
+        const data = await response.json();
+        indexedFiles = data.files || [];
+        
+        if (indexedFiles.length === 0) {
+          list.innerHTML = '<div class="selection-placeholder">No indexed files yet. Index a repository first!</div>';
+        } else {
+          list.innerHTML = indexedFiles.map(f => `
+            <div class="file-item" data-path="${f.file_path}" data-hash="${f.file_path_hash}" data-repo="${f.repo_id}" onclick="viewFileChunks(this)">
+              <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+              </svg>
+              <div class="file-info">
+                <div class="file-name">${f.file_path}</div>
+                <div class="file-meta">${f.chunk_count} chunks • ${new Date(f.updated_at).toLocaleDateString()}</div>
+              </div>
+            </div>
+          `).join('');
+        }
+        
+        showToast(`Loaded ${indexedFiles.length} indexed files`, 'success');
+        
+      } catch (error) {
+        list.innerHTML = `<div class="selection-placeholder" style="color: var(--error);">Error: ${error.message}</div>`;
+        showToast('Error: ' + error.message, 'error');
+      }
+    }
+
+    async function viewFileChunks(el) {
+      const workspaceId = getWorkspaceId();
+      const filePath = el.dataset.path;
+      const fileHash = el.dataset.hash;
+      const repoId = el.dataset.repo;
+      
+      // Mark as active
+      document.querySelectorAll('.file-item').forEach(f => f.classList.remove('active'));
+      el.classList.add('active');
+      
+      const container = document.getElementById('chunks-container');
+      const chunksSection = document.getElementById('file-chunks');
+      
+      document.getElementById('viewing-file-name').textContent = filePath.split('/').pop();
+      container.innerHTML = '<div class="chunk-loading"><div class="loading"></div> Loading chunks...</div>';
+      chunksSection.classList.remove('hidden');
+      
+      try {
+        const response = await fetch(`${API_BASE}/api/index/chunks/${workspaceId}?file_path=${encodeURIComponent(filePath)}&limit=50`);
+        
+        if (!response.ok) throw new Error('Failed to fetch chunks');
+        
+        const data = await response.json();
+        const fileData = data.files.find(f => f.file_path === filePath);
+        
+        if (!fileData || fileData.chunks.length === 0) {
+          container.innerHTML = '<div class="chunk-loading">No chunks found for this file</div>';
+          return;
+        }
+        
+        const chunks = fileData.chunks;
+        document.getElementById('chunk-count-label').textContent = `${chunks.length} chunks`;
+        
+        // Get the repo full name from the selected repo or the first indexed file
+        const repoSelect = document.getElementById('repo-select');
+        currentViewingRepo = repoSelect.value || null;
+        
+        container.innerHTML = chunks.map((chunk, i) => `
+          <div class="chunk-card" data-file="${filePath}" data-start="${chunk.start_line}" data-end="${chunk.end_line}">
+            <div class="chunk-header" onclick="toggleChunk(this)">
+              <div class="chunk-meta">
+                <span class="chunk-index">Chunk #${chunk.chunk_index}</span>
+                <span class="chunk-lines">Lines ${chunk.start_line}-${chunk.end_line}</span>
+              </div>
+              <svg class="chunk-expand-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+            <div class="chunk-content">
+              <div class="chunk-loading"><div class="loading"></div> Loading code...</div>
+            </div>
+          </div>
+        `).join('');
+        
+      } catch (error) {
+        container.innerHTML = `<div class="chunk-loading" style="color: var(--error);">Error: ${error.message}</div>`;
+        showToast('Error: ' + error.message, 'error');
+      }
+    }
+
+    async function toggleChunk(header) {
+      const card = header.closest('.chunk-card');
+      const isExpanding = !card.classList.contains('expanded');
+      
+      card.classList.toggle('expanded');
+      
+      if (!isExpanding) return;
+      
+      const content = card.querySelector('.chunk-content');
+      const filePath = card.dataset.file;
+      const startLine = parseInt(card.dataset.start);
+      const endLine = parseInt(card.dataset.end);
+      
+      // Check if already loaded
+      if (content.dataset.loaded === 'true') return;
+      
+      const workspaceId = getWorkspaceId();
+      if (!currentViewingRepo) {
+        content.innerHTML = '<div class="chunk-loading" style="color: var(--warning);">Please select a repository first to view code content</div>';
+        return;
+      }
+      
+      try {
+        const response = await fetch(
+          `${API_BASE}/api/index/chunk-content/${workspaceId}?` +
+          `repo_full_name=${encodeURIComponent(currentViewingRepo)}&` +
+          `file_path=${encodeURIComponent(filePath)}&` +
+          `start_line=${startLine}&` +
+          `end_line=${endLine}`
+        );
+        
+        if (!response.ok) throw new Error('Failed to fetch code');
+        
+        const data = await response.json();
+        
+        // Format with line numbers
+        const lines = data.content.split('\n');
+        const formattedLines = lines.map((line, i) => {
+          const lineNum = startLine + i;
+          return `<span class="line-number">${lineNum}</span>${escapeHtml(line)}`;
+        }).join('\n');
+        
+        content.innerHTML = `<pre class="chunk-code">${formattedLines}</pre>`;
+        content.dataset.loaded = 'true';
+        
+      } catch (error) {
+        content.innerHTML = `<div class="chunk-loading" style="color: var(--error);">Error: ${error.message}</div>`;
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // ==========================================================================
+    // Initialize
+    // ==========================================================================
+    loadWorkspaces();
+  </script>
+</body>
+</html>

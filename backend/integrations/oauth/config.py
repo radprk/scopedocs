@@ -58,7 +58,11 @@ def get_github_config() -> OAuthConfig:
 
 
 def get_slack_config() -> OAuthConfig:
-    """Get Slack OAuth configuration."""
+    """Get Slack OAuth configuration.
+    
+    Uses USER scopes (not bot) so we get a user token that can access
+    channels the user is in, without needing to invite a bot.
+    """
     base_url = get_base_url()
     return OAuthConfig(
         client_id=os.environ.get("SLACK_CLIENT_ID"),
@@ -66,12 +70,14 @@ def get_slack_config() -> OAuthConfig:
         redirect_uri=f"{base_url}/api/oauth/slack/callback",
         authorize_url="https://slack.com/oauth/v2/authorize",
         token_url="https://slack.com/api/oauth.v2.access",
+        # USER scopes - gives us a user token (xoxp-) instead of bot token (xoxb-)
         scopes=[
             "channels:history",
             "channels:read", 
             "groups:history",
             "groups:read",
             "users:read",
+            "team:read",  # To get workspace info
         ],
     )
 

@@ -1,3 +1,4 @@
+import json
 import os
 import uuid
 from datetime import datetime
@@ -129,6 +130,41 @@ async def init_pg() -> None:
                 data jsonb NOT NULL,
                 updated_at timestamptz NOT NULL DEFAULT NOW()
             );
+            CREATE TABLE IF NOT EXISTS workspaces (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name TEXT NOT NULL,
+                slug TEXT NOT NULL UNIQUE,
+                github_org_id TEXT,
+                slack_team_id TEXT,
+                linear_org_id TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            
+            -- Code indexing tables
+            CREATE TABLE IF NOT EXISTS file_path_lookup (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                repo_id UUID NOT NULL,
+                file_path_hash TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                file_content_hash TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (repo_id, file_path_hash)
+            );
+            
+            CREATE TABLE IF NOT EXISTS code_chunks (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                repo_id UUID NOT NULL,
+                file_path_hash TEXT NOT NULL,
+                chunk_hash TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                start_line INTEGER NOT NULL,
+                end_line INTEGER NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (repo_id, file_path_hash, chunk_index)
+            );
             """
         )
 
@@ -186,16 +222,18 @@ def _ensure_id(data: Dict[str, Any]) -> str:
     return item_id
 
 
-async def upsert_work_item(payload: Any) -> None:
+async def upsert_work_item(payload: Any, workspace_id: str = None) -> None:
     data = _normalize_payload(payload)
     item_id = _ensure_id(data)
     external_id = data.get("external_id")
+    if workspace_id:
+        data["workspace_id"] = workspace_id
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
             """
             INSERT INTO work_items (id, external_id, project_id, data, updated_at)
-            VALUES ($1, $2, $3, $4, $5)
+            VALUES ($1, $2, $3, $4::jsonb, $5)
             ON CONFLICT (external_id)
             DO UPDATE SET
                 id = EXCLUDED.id,
@@ -206,21 +244,23 @@ async def upsert_work_item(payload: Any) -> None:
             item_id,
             external_id,
             data.get("project_id"),
-            data,
+            json.dumps(data),
             datetime.utcnow(),
         )
 
 
-async def upsert_pull_request(payload: Any) -> None:
+async def upsert_pull_request(payload: Any, workspace_id: str = None) -> None:
     data = _normalize_payload(payload)
     item_id = _ensure_id(data)
     external_id = data.get("external_id")
+    if workspace_id:
+        data["workspace_id"] = workspace_id
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
             """
             INSERT INTO pull_requests (id, external_id, repo, data, updated_at)
-            VALUES ($1, $2, $3, $4, $5)
+            VALUES ($1, $2, $3, $4::jsonb, $5)
             ON CONFLICT (external_id)
             DO UPDATE SET
                 id = EXCLUDED.id,
@@ -231,21 +271,23 @@ async def upsert_pull_request(payload: Any) -> None:
             item_id,
             external_id,
             data.get("repo"),
-            data,
+            json.dumps(data),
             datetime.utcnow(),
         )
 
 
-async def upsert_conversation(payload: Any) -> None:
+async def upsert_conversation(payload: Any, workspace_id: str = None) -> None:
     data = _normalize_payload(payload)
     item_id = _ensure_id(data)
     external_id = data.get("external_id")
+    if workspace_id:
+        data["workspace_id"] = workspace_id
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
             """
             INSERT INTO conversations (id, external_id, channel, data, updated_at)
-            VALUES ($1, $2, $3, $4, $5)
+            VALUES ($1, $2, $3, $4::jsonb, $5)
             ON CONFLICT (external_id)
             DO UPDATE SET
                 id = EXCLUDED.id,
@@ -256,7 +298,7 @@ async def upsert_conversation(payload: Any) -> None:
             item_id,
             external_id,
             data.get("channel"),
-            data,
+            json.dumps(data),
             datetime.utcnow(),
         )
 
@@ -468,7 +510,7 @@ async def upsert_integration_token(payload: Any) -> None:
         await conn.execute(
             """
             INSERT INTO integration_tokens (id, integration, workspace_id, data, updated_at)
-            VALUES ($1, $2, $3, $4, $5)
+            VALUES ($1, $2, $3, $4::jsonb, $5)
             ON CONFLICT (integration, workspace_id)
             DO UPDATE SET
                 data = EXCLUDED.data,
@@ -477,7 +519,7 @@ async def upsert_integration_token(payload: Any) -> None:
             item_id,
             data.get("integration"),
             data.get("workspace_id"),
-            data,
+            json.dumps(data),  # Convert dict to JSON string for JSONB column
             datetime.utcnow(),
         )
 
@@ -495,7 +537,12 @@ async def get_integration_token(integration: str, workspace_id: str) -> Optional
         )
         if not row:
             return None
-        return row["data"]
+        data = row["data"]
+        # Handle both JSON string and dict
+        if isinstance(data, str):
+            import json
+            data = json.loads(data)
+        return data
 
 
 async def upsert_ingestion_job(payload: Any) -> None:
@@ -598,3 +645,52 @@ async def find_latest_ingestion_checkpoint(job_type: str, source: str, project_i
             return datetime.fromisoformat(row["checkpoint"].replace('Z', '+00:00'))
         except (ValueError, AttributeError):
             return None
+
+
+# =============================================================================
+# Workspace functions
+# =============================================================================
+
+async def list_workspaces() -> list:
+    """List all workspaces."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, name, slug, github_org_id, slack_team_id, linear_org_id, created_at
+            FROM workspaces
+            ORDER BY created_at DESC
+            """
+        )
+        return [dict(row) for row in rows]
+
+
+async def get_workspace(workspace_id: str) -> Optional[dict]:
+    """Get a workspace by ID."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, name, slug, github_org_id, slack_team_id, linear_org_id, created_at
+            FROM workspaces
+            WHERE id = $1::uuid
+            """,
+            workspace_id,
+        )
+        return dict(row) if row else None
+
+
+async def create_workspace(name: str, slug: str) -> dict:
+    """Create a new workspace."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO workspaces (name, slug)
+            VALUES ($1, $2)
+            RETURNING id, name, slug, github_org_id, slack_team_id, linear_org_id, created_at
+            """,
+            name,
+            slug,
+        )
+        return dict(row)

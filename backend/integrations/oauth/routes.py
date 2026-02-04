@@ -16,7 +16,6 @@ from backend.integrations.oauth.config import (
     get_linear_config,
     get_github_config,
     get_slack_config,
-    get_frontend_url,
 )
 from backend.storage.postgres import upsert_integration_token, get_pool
 
@@ -182,18 +181,49 @@ async def linear_callback(
         
         token_data = response.json()
     
+    # Get Linear organization info
+    linear_org_id = None
+    linear_org_name = None
+    async with httpx.AsyncClient() as client:
+        org_response = await client.post(
+            "https://api.linear.app/graphql",
+            headers={"Authorization": f"Bearer {token_data['access_token']}"},
+            json={"query": "{ organization { id name } viewer { id email name } }"}
+        )
+        if org_response.status_code == 200:
+            org_data = org_response.json().get("data", {})
+            linear_org = org_data.get("organization", {})
+            linear_org_id = linear_org.get("id")
+            linear_org_name = linear_org.get("name")
+            viewer = org_data.get("viewer", {})
+    
     # Store token
     await store_token(
         integration="linear",
         workspace_id=workspace_id,
         access_token=token_data["access_token"],
         expires_in=token_data.get("expires_in"),
-        metadata={"scope": token_data.get("scope")},
+        metadata={
+            "scope": token_data.get("scope"),
+            "org_id": linear_org_id,
+            "org_name": linear_org_name,
+            "user_id": viewer.get("id") if 'viewer' in dir() else None,
+            "user_email": viewer.get("email") if 'viewer' in dir() else None,
+        },
     )
     
-    # Redirect to frontend
-    frontend_url = get_frontend_url()
-    return RedirectResponse(url=f"{frontend_url}/settings?connected=linear")
+    # Update workspace with Linear org ID
+    if linear_org_id:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE workspaces SET linear_org_id = $1 WHERE id = $2::uuid",
+                linear_org_id, workspace_id
+            )
+            print(f"[OAuth] Updated workspace {workspace_id} with Linear org_id: {linear_org_id} ({linear_org_name})")
+    
+    # Redirect back to UI with workspace ID (always use relative path)
+    return RedirectResponse(url=f"/ui#{workspace_id}", status_code=302)
 
 
 # =============================================================================
@@ -273,6 +303,23 @@ async def github_callback(
             },
         )
         user_data = user_response.json() if user_response.status_code == 200 else {}
+        
+        # Get user's organizations
+        orgs_response = await client.get(
+            "https://api.github.com/user/orgs",
+            headers={
+                "Authorization": f"Bearer {token_data['access_token']}",
+                "Accept": "application/vnd.github+json",
+            },
+        )
+        orgs_data = orgs_response.json() if orgs_response.status_code == 200 else []
+    
+    # Use first org if available, otherwise use user ID
+    github_org_id = None
+    github_org_login = None
+    if orgs_data and len(orgs_data) > 0:
+        github_org_id = str(orgs_data[0].get("id"))
+        github_org_login = orgs_data[0].get("login")
     
     # Store token
     await store_token(
@@ -284,12 +331,24 @@ async def github_callback(
             "token_type": token_data.get("token_type"),
             "user_login": user_data.get("login"),
             "user_id": user_data.get("id"),
+            "org_id": github_org_id,
+            "org_login": github_org_login,
+            "orgs": [{"id": o.get("id"), "login": o.get("login")} for o in (orgs_data or [])],
         },
     )
     
-    # Redirect to frontend
-    frontend_url = get_frontend_url()
-    return RedirectResponse(url=f"{frontend_url}/settings?connected=github")
+    # Update workspace with GitHub org ID
+    if github_org_id:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE workspaces SET github_org_id = $1 WHERE id = $2::uuid",
+                github_org_id, workspace_id
+            )
+            print(f"[OAuth] Updated workspace {workspace_id} with GitHub org_id: {github_org_id} ({github_org_login})")
+    
+    # Redirect back to UI with workspace ID (always use relative path)
+    return RedirectResponse(url=f"/ui#{workspace_id}", status_code=302)
 
 
 # =============================================================================
@@ -298,7 +357,12 @@ async def github_callback(
 
 @router.get("/slack/connect")
 async def connect_slack(workspace_id: str = Query(..., description="Workspace ID")):
-    """Start Slack OAuth flow."""
+    """Start Slack OAuth flow.
+    
+    Uses user_scope instead of scope to request a USER token (xoxp-)
+    instead of a bot token (xoxb-). User tokens can access channels
+    the user is in without needing to invite a bot.
+    """
     config = get_slack_config()
     if not config.is_configured:
         raise HTTPException(
@@ -308,14 +372,16 @@ async def connect_slack(workspace_id: str = Query(..., description="Workspace ID
     
     state = generate_state(workspace_id, "slack")
     
+    # Use user_scope for USER token (xoxp-) instead of scope for bot token
     params = {
         "client_id": config.client_id,
         "redirect_uri": config.redirect_uri,
-        "scope": ",".join(config.scopes),
+        "user_scope": ",".join(config.scopes),  # user_scope gives us user token
         "state": state,
     }
     
     redirect_url = f"{config.authorize_url}?{urlencode(params)}"
+    print(f"[OAuth] Slack user token flow: {redirect_url}")
     return RedirectResponse(url=redirect_url)
 
 
@@ -353,7 +419,11 @@ async def slack_callback(
             )
     
     # Store token (Slack returns access_token at top level or in authed_user)
-    access_token = token_data.get("access_token")
+    # For user tokens, check authed_user first
+    access_token = token_data.get("authed_user", {}).get("access_token") or token_data.get("access_token")
+    
+    team_id = token_data.get("team", {}).get("id")
+    team_name = token_data.get("team", {}).get("name")
     
     # Store token
     await store_token(
@@ -361,16 +431,26 @@ async def slack_callback(
         workspace_id=workspace_id,
         access_token=access_token,
         metadata={
-            "team_id": token_data.get("team", {}).get("id"),
-            "team_name": token_data.get("team", {}).get("name"),
-            "scope": token_data.get("scope"),
+            "team_id": team_id,
+            "team_name": team_name,
+            "scope": token_data.get("scope") or token_data.get("authed_user", {}).get("scope"),
             "bot_user_id": token_data.get("bot_user_id"),
+            "user_id": token_data.get("authed_user", {}).get("id"),
         },
     )
     
-    # Redirect to frontend
-    frontend_url = get_frontend_url()
-    return RedirectResponse(url=f"{frontend_url}/settings?connected=slack")
+    # Update workspace with Slack team ID
+    if team_id:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE workspaces SET slack_team_id = $1 WHERE id = $2::uuid",
+                team_id, workspace_id
+            )
+            print(f"[OAuth] Updated workspace {workspace_id} with Slack team_id: {team_id}")
+    
+    # Redirect back to UI with workspace ID (always use relative path)
+    return RedirectResponse(url=f"/ui#{workspace_id}", status_code=302)
 
 
 # =============================================================================

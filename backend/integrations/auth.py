@@ -2,8 +2,17 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 import os
 import json
-import boto3
-from botocore.exceptions import BotoCoreError, ClientError
+
+# boto3 is optional - only needed for AWS Secrets Manager
+try:
+    import boto3
+    from botocore.exceptions import BotoCoreError, ClientError
+    HAS_BOTO3 = True
+except ImportError:
+    HAS_BOTO3 = False
+    boto3 = None
+    BotoCoreError = Exception
+    ClientError = Exception
 
 from backend.models import IntegrationToken
 from backend.storage.postgres import (
@@ -29,6 +38,8 @@ def load_integration_secret(secret_name: str) -> Optional[Dict[str, Any]]:
     """Load secrets from env or AWS Secrets Manager based on config."""
     secret_manager = os.environ.get('SECRET_MANAGER', 'env').lower()
     if secret_manager == 'aws':
+        if not HAS_BOTO3:
+            return None
         secret_id = os.environ.get(secret_name)
         if not secret_id:
             return None
