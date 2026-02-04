@@ -16,6 +16,14 @@ from backend.sync.routes import router as sync_router
 from backend.integrations.oauth.routes import router as oauth_router
 from backend.storage.postgres import init_pg, close_pool, list_workspaces, create_workspace, get_workspace
 
+# AI router (optional - only loaded if TOGETHER_API_KEY is set)
+ai_router = None
+try:
+    if os.environ.get("TOGETHER_API_KEY"):
+        from backend.ai.routes import router as ai_router
+except ImportError:
+    pass  # AI module not available
+
 ROOT_DIR = Path(__file__).parent
 PROJECT_ROOT = ROOT_DIR.parent
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
@@ -34,6 +42,8 @@ logger = logging.getLogger(__name__)
 # Include routers
 app.include_router(sync_router)
 app.include_router(oauth_router)
+if ai_router:
+    app.include_router(ai_router)
 
 # CORS middleware
 app.add_middleware(
@@ -47,16 +57,26 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
+    endpoints = {
+        "ui": "/ui",
+        "oauth": "/api/oauth/{provider}/connect",
+        "sync": "/api/sync/{integration}",
+        "health": "/health"
+    }
+    if ai_router:
+        endpoints.update({
+            "ai_search": "/api/ai/search",
+            "ai_chat": "/api/ai/chat",
+            "ai_generate_doc": "/api/ai/generate/doc",
+            "ai_embed": "/api/ai/embed/code",
+            "ai_health": "/api/ai/health"
+        })
     return {
         "name": "ScopeDocs API",
         "version": "1.0.0",
         "status": "running",
-        "endpoints": {
-            "ui": "/ui",
-            "oauth": "/api/oauth/{provider}/connect",
-            "sync": "/api/sync/{integration}",
-            "health": "/health"
-        }
+        "ai_enabled": ai_router is not None,
+        "endpoints": endpoints
     }
 
 
