@@ -28,6 +28,42 @@ class MockFile:
         if not self.sha:
             self.sha = hashlib.sha1(self.content.encode()).hexdigest()
 
+    @property
+    def language(self) -> str:
+        """Infer language from file extension."""
+        ext_map = {
+            ".py": "python",
+            ".js": "javascript",
+            ".ts": "typescript",
+            ".tsx": "typescript",
+            ".jsx": "javascript",
+            ".go": "go",
+            ".rs": "rust",
+            ".java": "java",
+            ".rb": "ruby",
+            ".php": "php",
+            ".c": "c",
+            ".cpp": "cpp",
+            ".h": "c",
+            ".hpp": "cpp",
+            ".cs": "csharp",
+            ".swift": "swift",
+            ".kt": "kotlin",
+            ".scala": "scala",
+            ".md": "markdown",
+            ".json": "json",
+            ".yaml": "yaml",
+            ".yml": "yaml",
+            ".xml": "xml",
+            ".html": "html",
+            ".css": "css",
+            ".sql": "sql",
+            ".sh": "shell",
+            ".bash": "shell",
+        }
+        ext = "." + self.path.rsplit(".", 1)[-1] if "." in self.path else ""
+        return ext_map.get(ext.lower(), "unknown")
+
 
 @dataclass
 class MockPR:
@@ -49,6 +85,11 @@ class MockSlackMessage:
     text: str
     user: str
     timestamp: str
+
+    @property
+    def content(self) -> str:
+        """Alias for text to maintain compatibility."""
+        return self.text
 
 
 @dataclass

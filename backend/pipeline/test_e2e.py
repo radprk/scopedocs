@@ -396,17 +396,15 @@ async def run_e2e_test(use_mock_ai: bool = True, db_url: Optional[str] = None):
     # Extract from Slack messages
     print_progress("Extracting traceability from Slack messages...")
     for msg in mock_data.slack_messages:
-        result = extractor.extract_from_message(
-            message_id=msg.external_id,
-            content=msg.content,
-            channel=msg.channel,
-            source="slack",
-            thread_context=msg.thread_context,
+        result = extractor.extract_from_slack_message(
+            message_id=msg.id,
+            message_text=msg.text,
+            channel_name=msg.channel,
         )
         all_links.extend(result.links)
 
         if result.links:
-            print_success(f"  Message {msg.external_id[:8]}: Found {len(result.links)} links")
+            print_success(f"  Message {msg.id[:8]}: Found {len(result.links)} links")
 
     print_success(f"Total traceability links extracted: {len(all_links)}")
 
