@@ -213,3 +213,136 @@ class IngestionJob(BaseModel):
     last_error: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# =============================================================================
+# AI Layer Models
+# =============================================================================
+
+class DocType(str, Enum):
+    """Types of generated documentation."""
+    OVERVIEW = "overview"
+    MODULE = "module"
+    FILE = "file"
+    FUNCTION = "function"
+
+
+class LinkType(str, Enum):
+    """Types of doc-to-code links."""
+    EXPLAINS = "explains"
+    REFERENCES = "references"
+    EXAMPLE_OF = "example_of"
+
+
+class MessageSource(str, Enum):
+    """Source of embedded messages."""
+    SLACK = "slack"
+    LINEAR = "linear"
+
+
+class CodeEmbedding(BaseModel):
+    """Embedded code chunk with vector representation."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    workspace_id: str
+    repo_full_name: str
+    file_path: str
+    commit_sha: str
+    chunk_index: int
+    start_line: int
+    end_line: int
+    content_hash: str
+    embedding: Optional[List[float]] = None
+    symbol_names: List[str] = []
+    language: Optional[str] = None
+    metadata: Dict[str, Any] = {}
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class GeneratedDoc(BaseModel):
+    """AI-generated documentation."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    workspace_id: str
+    repo_full_name: str
+    file_path: Optional[str] = None
+    doc_type: DocType
+    title: str
+    content: str
+    embedding: Optional[List[float]] = None
+    source_chunks: List[str] = []
+    source_commit_sha: Optional[str] = None
+    version: int = 1
+    is_stale: bool = False
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class DocCodeLink(BaseModel):
+    """Link between documentation and code."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    workspace_id: str
+    doc_id: str
+    doc_section: Optional[str] = None
+    doc_line_start: Optional[int] = None
+    doc_line_end: Optional[int] = None
+    code_embedding_id: Optional[str] = None
+    repo_full_name: str
+    file_path: str
+    code_line_start: int
+    code_line_end: int
+    link_type: LinkType = LinkType.EXPLAINS
+    confidence: float = 1.0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class MessageEmbedding(BaseModel):
+    """Embedded Slack/Linear message."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    workspace_id: str
+    source: MessageSource
+    external_id: str
+    channel_or_project: Optional[str] = None
+    summary: Optional[str] = None
+    embedding: Optional[List[float]] = None
+    linked_code_chunks: List[str] = []
+    linked_prs: List[str] = []
+    linked_issues: List[str] = []
+    message_type: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class TraceabilityLink(BaseModel):
+    """Link in the traceability graph (Linear issue -> PR -> Code)."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    workspace_id: str
+    source_type: str  # 'linear_issue', 'github_pr', 'slack_message', 'code_file'
+    source_external_id: str
+    source_title: Optional[str] = None
+    target_type: str
+    target_external_id: str
+    target_title: Optional[str] = None
+    link_type: str  # 'implements', 'discusses', 'mentions', 'modifies'
+    confidence: float = 1.0
+    evidence: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ChatSession(BaseModel):
+    """Chat session for conversational Q&A."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    workspace_id: str
+    repo_full_name: Optional[str] = None
+    title: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ChatMessageRecord(BaseModel):
+    """Message in a chat session."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    session_id: str
+    role: str  # 'user', 'assistant'
+    content: str
+    sources: List[Dict[str, Any]] = []
+    created_at: datetime = Field(default_factory=datetime.utcnow)
