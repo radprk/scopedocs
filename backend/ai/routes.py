@@ -10,6 +10,12 @@ from .client import get_client, TogetherClient
 from .embeddings import EmbeddingService, CodeChunk
 from .generation import DocGenerationService
 from .search import SearchService
+from .audiences import (
+    Audience,
+    MultiAudienceDocService,
+    get_audience_profile,
+    list_audiences,
+)
 
 
 router = APIRouter(prefix="/api/ai", tags=["AI"])
@@ -96,6 +102,52 @@ class DocCodeLinkResponse(BaseModel):
     code_line_end: int
     link_type: str
     confidence: float
+
+
+class GenerateAudienceDocRequest(BaseModel):
+    workspace_id: str
+    repo_full_name: str
+    file_path: str
+    code: str
+    language: str
+    commit_sha: str
+    audience: str  # one of: non_technical, data_ai_engineer, backend_engineer, frontend_designer
+    context: Optional[Dict[str, Any]] = None  # git_history, related_files, readme
+
+
+class GenerateAllAudiencesRequest(BaseModel):
+    workspace_id: str
+    repo_full_name: str
+    file_path: str
+    code: str
+    language: str
+    commit_sha: str
+    context: Optional[Dict[str, Any]] = None
+
+
+class GenerateRepoOverviewRequest(BaseModel):
+    workspace_id: str
+    repo_full_name: str
+    readme_content: Optional[str] = None
+    file_summaries: List[Dict[str, str]]  # [{"path": "...", "summary": "..."}]
+    commit_sha: str
+    git_history: Optional[str] = None
+    audience: Optional[str] = None  # if None, generate for all
+
+
+class AudienceDocResponse(BaseModel):
+    audience: str
+    audience_name: str
+    doc_id: str
+    title: str
+    content: str
+    doc_type: str
+
+
+class AudienceInfo(BaseModel):
+    id: str
+    name: str
+    description: str
 
 
 # =============================================================================
@@ -406,3 +458,193 @@ async def ai_health():
         "generation_model": "Qwen/Qwen2.5-Coder-32B-Instruct",
         "embedding_dimensions": 1024,
     }
+
+
+# =============================================================================
+# Multi-Audience Documentation Routes
+# =============================================================================
+
+@router.get("/audiences", response_model=List[AudienceInfo])
+async def get_audiences():
+    """
+    List available documentation audiences.
+
+    Returns the four audience types with their descriptions:
+    - non_technical: Product & Business Stakeholders
+    - data_ai_engineer: Data & AI Engineers
+    - backend_engineer: Backend Engineers
+    - frontend_designer: Frontend Engineers & Designers
+    """
+    return [AudienceInfo(**a) for a in list_audiences()]
+
+
+@router.post("/generate/audience", response_model=AudienceDocResponse)
+async def generate_doc_for_audience(request: GenerateAudienceDocRequest):
+    """
+    Generate documentation for a file, tailored to a specific audience.
+
+    Each audience gets documentation written from their perspective:
+    - non_technical: Business value, user impact, no code snippets
+    - data_ai_engineer: Embeddings, pipelines, model details
+    - backend_engineer: APIs, schemas, service architecture
+    - frontend_designer: Response formats, states, UI integration
+    """
+    pool = await get_pool()
+    service = MultiAudienceDocService(pool)
+
+    try:
+        audience = Audience(request.audience)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid audience. Valid options: {[a.value for a in Audience]}"
+        )
+
+    profile = get_audience_profile(audience)
+
+    doc = await service.generate_for_audience(
+        audience=audience,
+        workspace_id=request.workspace_id,
+        repo_full_name=request.repo_full_name,
+        file_path=request.file_path,
+        code=request.code,
+        language=request.language,
+        commit_sha=request.commit_sha,
+        context=request.context,
+    )
+
+    return AudienceDocResponse(
+        audience=audience.value,
+        audience_name=profile.display_name,
+        doc_id=doc.id,
+        title=doc.title,
+        content=doc.content,
+        doc_type=doc.doc_type,
+    )
+
+
+@router.post("/generate/all-audiences")
+async def generate_doc_for_all_audiences(request: GenerateAllAudiencesRequest):
+    """
+    Generate documentation for all four audiences in parallel.
+
+    Returns a dict with docs for each audience type.
+    """
+    pool = await get_pool()
+    service = MultiAudienceDocService(pool)
+
+    docs = await service.generate_for_all_audiences(
+        workspace_id=request.workspace_id,
+        repo_full_name=request.repo_full_name,
+        file_path=request.file_path,
+        code=request.code,
+        language=request.language,
+        commit_sha=request.commit_sha,
+        context=request.context,
+    )
+
+    result = {}
+    for audience, doc in docs.items():
+        profile = get_audience_profile(audience)
+        result[audience.value] = {
+            "audience_name": profile.display_name,
+            "doc_id": doc.id,
+            "title": doc.title,
+            "content": doc.content,
+            "doc_type": doc.doc_type,
+        }
+
+    return {"docs": result}
+
+
+@router.post("/generate/repo-overview")
+async def generate_repo_overview_for_audiences(request: GenerateRepoOverviewRequest):
+    """
+    Generate a repository overview for one or all audiences.
+
+    If audience is specified, generates for that audience only.
+    If audience is None, generates for all four audiences.
+    """
+    pool = await get_pool()
+    service = MultiAudienceDocService(pool)
+
+    if request.audience:
+        try:
+            audience = Audience(request.audience)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid audience. Valid options: {[a.value for a in Audience]}"
+            )
+
+        doc = await service.generate_repo_overview_for_audience(
+            audience=audience,
+            workspace_id=request.workspace_id,
+            repo_full_name=request.repo_full_name,
+            readme_content=request.readme_content,
+            file_summaries=request.file_summaries,
+            commit_sha=request.commit_sha,
+            git_history=request.git_history,
+        )
+
+        profile = get_audience_profile(audience)
+        return {
+            "docs": {
+                audience.value: {
+                    "audience_name": profile.display_name,
+                    "doc_id": doc.id,
+                    "title": doc.title,
+                    "content": doc.content,
+                    "doc_type": doc.doc_type,
+                }
+            }
+        }
+    else:
+        docs = await service.generate_all_repo_overviews(
+            workspace_id=request.workspace_id,
+            repo_full_name=request.repo_full_name,
+            readme_content=request.readme_content,
+            file_summaries=request.file_summaries,
+            commit_sha=request.commit_sha,
+            git_history=request.git_history,
+        )
+
+        result = {}
+        for audience, doc in docs.items():
+            profile = get_audience_profile(audience)
+            result[audience.value] = {
+                "audience_name": profile.display_name,
+                "doc_id": doc.id,
+                "title": doc.title,
+                "content": doc.content,
+                "doc_type": doc.doc_type,
+            }
+
+        return {"docs": result}
+
+
+@router.get("/docs/audience/{workspace_id}/{audience}")
+async def list_docs_by_audience(
+    workspace_id: str,
+    audience: str,
+    repo_full_name: Optional[str] = None,
+):
+    """List generated documentation for a specific audience."""
+    pool = await get_pool()
+    service = MultiAudienceDocService(pool)
+
+    try:
+        audience_enum = Audience(audience)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid audience. Valid options: {[a.value for a in Audience]}"
+        )
+
+    docs = await service.get_docs_by_audience(
+        workspace_id=workspace_id,
+        audience=audience_enum,
+        repo_full_name=repo_full_name,
+    )
+
+    return {"docs": docs}
