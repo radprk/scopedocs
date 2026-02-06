@@ -2,14 +2,21 @@
 ScopeDocs API Server - Minimal MVP
 OAuth + Database + Sync workflows only
 """
-from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
 import os
 import logging
 from pathlib import Path
+
+# Load .env FIRST before checking env vars
+from dotenv import load_dotenv
+ROOT_DIR = Path(__file__).parent
+PROJECT_ROOT = ROOT_DIR.parent
+FRONTEND_DIR = PROJECT_ROOT / "frontend"
+load_dotenv(ROOT_DIR / '.env')
+
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from starlette.middleware.cors import CORSMiddleware
 
 # Import routers
 from backend.sync.routes import router as sync_router
@@ -18,16 +25,14 @@ from backend.storage.postgres import init_pg, close_pool, list_workspaces, creat
 
 # AI router (optional - only loaded if TOGETHER_API_KEY is set)
 ai_router = None
-try:
-    if os.environ.get("TOGETHER_API_KEY"):
+if os.environ.get("TOGETHER_API_KEY"):
+    try:
         from backend.ai.routes import router as ai_router
-except ImportError:
-    pass  # AI module not available
-
-ROOT_DIR = Path(__file__).parent
-PROJECT_ROOT = ROOT_DIR.parent
-FRONTEND_DIR = PROJECT_ROOT / "frontend"
-load_dotenv(ROOT_DIR / '.env')
+        print(f"[AI] AI routes enabled - TOGETHER_API_KEY is set")
+    except ImportError as e:
+        print(f"[AI] AI module not available: {e}")
+else:
+    print(f"[AI] AI routes disabled - TOGETHER_API_KEY not set")
 
 # Create the main app
 app = FastAPI(title="ScopeDocs API", version="1.0.0")
