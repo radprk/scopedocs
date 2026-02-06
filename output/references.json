@@ -1,0 +1,44 @@
+{
+  "[1]": {
+    "file_path": "backend/server.py",
+    "start_line": 1,
+    "end_line": 15,
+    "description": "FastAPI app initialization"
+  },
+  "[2]": {
+    "file_path": "backend/models.py",
+    "start_line": 1,
+    "end_line": 50,
+    "description": "Pydantic model definitions"
+  },
+  "[3]": {
+    "file_path": "code-indexing/src/indexing/chunker.py",
+    "start_line": 1,
+    "end_line": 50,
+    "description": "Chunker module and imports"
+  },
+  "[4]": {
+    "file_path": "code-indexing/src/indexing/chunker.py",
+    "start_line": 19,
+    "end_line": 46,
+    "description": "CodeChunk dataclass definition"
+  },
+  "[5]": {
+    "file_path": "db/schema.sql",
+    "start_line": 1,
+    "end_line": 75,
+    "description": "Database schema with pgvector"
+  },
+  "[6]": {
+    "file_path": "backend/server.py",
+    "start_line": 58,
+    "end_line": 120,
+    "description": "API endpoint definitions"
+  },
+  "[7]": {
+    "file_path": "db/schema.sql",
+    "start_line": 44,
+    "end_line": 72,
+    "description": "Code indexing tables (no content stored)"
+  }
+}

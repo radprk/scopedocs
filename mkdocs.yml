@@ -1,0 +1,33 @@
+site_name: ScopeDocs Documentation
+site_description: Living documentation system - understand how it works as you build it
+site_url: https://scopedocs.dev
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: indigo
+    accent: cyan
+  features:
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+
+nav:
+  - Overview: index.md
+  - Learning Path: learning-path.md
+  - Setup Guide: setup.md
+  - Data Flow: data-flow.md
+  - Architecture:
+    - Chunker: architecture/chunker.md
+    - Storage: architecture/storage.md
+    - Ingestion: architecture/ingestion.md
+    - Embeddings: architecture/embedding.md
+  - Testing: testing.md
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - admonition
+  - tables

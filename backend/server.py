@@ -91,6 +91,26 @@ async def serve_ui():
     return FileResponse(FRONTEND_DIR / "index.html")
 
 
+@app.get("/pipeline.html")
+async def serve_pipeline_ui():
+    """Serve the pipeline viewer UI."""
+    return FileResponse(FRONTEND_DIR / "pipeline.html")
+
+
+# Serve output files (sample docs and references)
+OUTPUT_DIR = PROJECT_ROOT / "output"
+
+
+@app.get("/output/{filename}")
+async def serve_output_file(filename: str):
+    """Serve files from the output directory."""
+    from fastapi import HTTPException
+    file_path = OUTPUT_DIR / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"File not found: {filename}")
+    return FileResponse(file_path)
+
+
 # =============================================================================
 # Workspace endpoints
 # =============================================================================
