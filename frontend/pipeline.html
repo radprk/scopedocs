@@ -306,8 +306,11 @@
       <button onclick="generateEmbeddings()" id="btn-embed" class="secondary">
         2. Generate Embeddings
       </button>
-      <button onclick="loadSampleDoc()" id="btn-doc" class="secondary">
-        3. View Documentation
+      <button onclick="searchCode()" id="btn-search" class="secondary">
+        3. Test Search
+      </button>
+      <button onclick="generateDoc()" id="btn-doc" class="secondary">
+        4. Generate Doc
       </button>
     </div>
 
@@ -652,8 +655,8 @@
     }
 
     async function generateEmbeddings() {
-      if (!workspaceId) {
-        log('Please select a workspace first', 'error');
+      if (!workspaceId || !repoFullName) {
+        log('Please select a workspace and repository first', 'error');
         return;
       }
 
@@ -677,22 +680,148 @@
 
         logData('AI service config', health);
 
-        // For MVP, we're just showing the flow
-        // Real embedding would call /api/ai/embed/code with chunk data
-        log('Embeddings would be generated here (requires chunks with content)', 'info');
+        // Call the actual embeddings endpoint
+        const res = await fetch(`${API}/api/index/embed`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspace_id: workspaceId,
+            repo_full_name: repoFullName
+          })
+        });
 
-        // Show sample embedding format
-        const sampleEmbedding = Array(10).fill(0).map(() => (Math.random() * 2 - 1).toFixed(4));
-        log(`Sample embedding (first 10 of 1024 dims): [${sampleEmbedding.join(', ')}, ...]`, 'data');
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.detail || 'Embedding failed');
+        }
+
+        log(`Embedded ${data.new_embeddings} new chunks (${data.skipped} unchanged)`, 'success');
+        logData('Embedding result', data);
 
         setStage(3, 'completed');
-        updateCount('count-embeddings', 'Ready');
+        updateCount('count-embeddings', `${data.total_embeddings} vectors`);
 
       } catch (e) {
         log(`Embedding error: ${e.message}`, 'error');
+        log('Make sure code_embeddings table exists in Supabase', 'info');
       } finally {
         btn.disabled = false;
         btn.textContent = '2. Generate Embeddings';
+      }
+    }
+
+    async function searchCode() {
+      if (!workspaceId) {
+        log('Please select a workspace first', 'error');
+        return;
+      }
+
+      const query = prompt('Enter search query:', 'How does the server handle requests?');
+      if (!query) return;
+
+      const btn = document.getElementById('btn-search');
+      btn.disabled = true;
+      btn.textContent = 'Searching...';
+
+      log(`Searching for: "${query}"`, 'info');
+
+      try {
+        const res = await fetch(`${API}/api/ai/search`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: query,
+            workspace_id: workspaceId,
+            repo_full_name: repoFullName,
+            top_k: 5
+          })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.detail || 'Search failed');
+        }
+
+        log(`Found ${data.total_results} results`, 'success');
+
+        if (data.results && data.results.length > 0) {
+          data.results.forEach((r, i) => {
+            log(`  [${i+1}] ${r.file_path}:${r.start_line}-${r.end_line} (similarity: ${r.similarity.toFixed(3)})`, 'data');
+          });
+
+          // Store as references for clicking
+          references = {};
+          data.results.forEach((r, i) => {
+            references[`[${i+1}]`] = {
+              file_path: r.file_path,
+              start_line: r.start_line,
+              end_line: r.end_line
+            };
+          });
+        } else {
+          log('No results found. Make sure embeddings exist in code_embeddings table.', 'info');
+        }
+
+      } catch (e) {
+        log(`Search error: ${e.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '3. Test Search';
+      }
+    }
+
+    async function generateDoc() {
+      if (!workspaceId || !repoFullName) {
+        log('Please select a workspace and repository first', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('btn-doc');
+      btn.disabled = true;
+      btn.textContent = 'Generating...';
+
+      setStage(4, 'active');
+      log('Generating documentation with LLM (Qwen2.5-Coder-32B)...', 'info');
+
+      try {
+        const res = await fetch(`${API}/api/ai/generate-doc`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspace_id: workspaceId,
+            repo_full_name: repoFullName,
+            doc_type: 'overview'
+          })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.detail || 'Generation failed');
+        }
+
+        log(`Generated: "${data.title}" (${data.content.length} chars)`, 'success');
+        logData('Token estimate', data.token_estimate);
+
+        // Store references
+        references = data.references;
+
+        // Render the documentation
+        const rendered = renderMarkdown(`# ${data.title}\n\n${data.content}`);
+        document.getElementById('doc-content').innerHTML = rendered;
+        document.getElementById('doc-title').textContent = data.title;
+
+        setStage(4, 'completed');
+        updateCount('count-docs', '1 doc');
+
+      } catch (e) {
+        log(`Generation error: ${e.message}`, 'error');
+        log('Make sure: 1) Embeddings exist, 2) TOGETHER_API_KEY is set', 'info');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '4. Generate Doc';
       }
     }
 
