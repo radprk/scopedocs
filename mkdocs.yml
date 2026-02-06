@@ -18,6 +18,7 @@ nav:
   - Learning Path: learning-path.md
   - Setup Guide: setup.md
   - Data Flow: data-flow.md
+  - RAG Pipeline: rag-pipeline.md
   - Architecture:
     - Chunker: architecture/chunker.md
     - Storage: architecture/storage.md
