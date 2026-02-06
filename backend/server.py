@@ -2,14 +2,21 @@
 ScopeDocs API Server - Minimal MVP
 OAuth + Database + Sync workflows only
 """
-from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
 import os
 import logging
 from pathlib import Path
+
+# Load .env FIRST before checking env vars
+from dotenv import load_dotenv
+ROOT_DIR = Path(__file__).parent
+PROJECT_ROOT = ROOT_DIR.parent
+FRONTEND_DIR = PROJECT_ROOT / "frontend"
+load_dotenv(ROOT_DIR / '.env')
+
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from starlette.middleware.cors import CORSMiddleware
 
 # Import routers
 from backend.sync.routes import router as sync_router
@@ -18,16 +25,14 @@ from backend.storage.postgres import init_pg, close_pool, list_workspaces, creat
 
 # AI router (optional - only loaded if TOGETHER_API_KEY is set)
 ai_router = None
-try:
-    if os.environ.get("TOGETHER_API_KEY"):
+if os.environ.get("TOGETHER_API_KEY"):
+    try:
         from backend.ai.routes import router as ai_router
-except ImportError:
-    pass  # AI module not available
-
-ROOT_DIR = Path(__file__).parent
-PROJECT_ROOT = ROOT_DIR.parent
-FRONTEND_DIR = PROJECT_ROOT / "frontend"
-load_dotenv(ROOT_DIR / '.env')
+        print(f"[AI] AI routes enabled - TOGETHER_API_KEY is set")
+    except ImportError as e:
+        print(f"[AI] AI module not available: {e}")
+else:
+    print(f"[AI] AI routes disabled - TOGETHER_API_KEY not set")
 
 # Create the main app
 app = FastAPI(title="ScopeDocs API", version="1.0.0")
@@ -89,6 +94,26 @@ async def health():
 async def serve_ui():
     """Serve the integration testing UI."""
     return FileResponse(FRONTEND_DIR / "index.html")
+
+
+@app.get("/pipeline.html")
+async def serve_pipeline_ui():
+    """Serve the pipeline viewer UI."""
+    return FileResponse(FRONTEND_DIR / "pipeline.html")
+
+
+# Serve output files (sample docs and references)
+OUTPUT_DIR = PROJECT_ROOT / "output"
+
+
+@app.get("/output/{filename}")
+async def serve_output_file(filename: str):
+    """Serve files from the output directory."""
+    from fastapi import HTTPException
+    file_path = OUTPUT_DIR / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"File not found: {filename}")
+    return FileResponse(file_path)
 
 
 # =============================================================================
@@ -899,6 +924,206 @@ async def api_index_stats(workspace_id: str):
             {"path": r["file_path"], "updated_at": r["updated_at"].isoformat()}
             for r in recent_files
         ]
+    }
+
+
+@app.post("/api/index/embed")
+async def api_generate_embeddings(data: dict):
+    """
+    Generate embeddings for indexed chunks and store in code_embeddings table.
+
+    Expected payload:
+    {
+        "workspace_id": "uuid",
+        "repo_full_name": "owner/repo"
+    }
+    """
+    from fastapi import HTTPException
+    import httpx
+    import hashlib
+    import os
+    import json
+    from backend.storage.postgres import get_pool
+    from backend.integrations.auth import get_integration_token
+
+    workspace_id = data.get("workspace_id")
+    repo_full_name = data.get("repo_full_name")
+
+    if not workspace_id or not repo_full_name:
+        raise HTTPException(status_code=400, detail="workspace_id and repo_full_name are required")
+
+    # Check Together.ai API key
+    together_key = os.environ.get("TOGETHER_API_KEY")
+    if not together_key:
+        raise HTTPException(status_code=400, detail="TOGETHER_API_KEY environment variable not set")
+
+    # Get GitHub token for fetching code
+    token = await get_integration_token("github", workspace_id)
+    if not token:
+        raise HTTPException(status_code=404, detail="GitHub not connected for this workspace")
+
+    repo_id = hashlib.sha256(f"{workspace_id}:{repo_full_name}".encode()).hexdigest()[:32]
+
+    pool = await get_pool()
+
+    # Get all chunks that don't have embeddings yet
+    async with pool.acquire() as conn:
+        # Get chunks from code_chunks
+        chunks = await conn.fetch(
+            """
+            SELECT c.id, c.chunk_hash, c.chunk_index, c.start_line, c.end_line,
+                   f.file_path, f.file_content_hash
+            FROM code_chunks c
+            JOIN file_path_lookup f ON c.file_path_hash = f.file_path_hash AND c.repo_id = f.repo_id
+            WHERE c.repo_id = $1
+            LIMIT 500
+            """,
+            repo_id
+        )
+
+    if not chunks:
+        raise HTTPException(status_code=404, detail="No chunks found. Run indexing first.")
+
+    logger.info(f"Found {len(chunks)} chunks to embed for {repo_full_name}")
+
+    stats = {
+        "total_chunks": len(chunks),
+        "new_embeddings": 0,
+        "skipped": 0,
+        "errors": []
+    }
+
+    # Fetch code and generate embeddings in batches
+    async with httpx.AsyncClient(timeout=120.0) as http:
+        batch_size = 20
+
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i + batch_size]
+            texts_to_embed = []
+            chunk_metadata = []
+
+            for chunk in batch:
+                file_path = chunk["file_path"]
+
+                # Fetch code from GitHub
+                try:
+                    url = f"https://raw.githubusercontent.com/{repo_full_name}/main/{file_path}"
+                    response = await http.get(
+                        url,
+                        headers={"Authorization": f"token {token.access_token}"}
+                    )
+
+                    if response.status_code != 200:
+                        stats["errors"].append(f"Failed to fetch {file_path}")
+                        continue
+
+                    lines = response.text.split("\n")
+                    code_content = "\n".join(lines[chunk["start_line"]-1:chunk["end_line"]])
+
+                    texts_to_embed.append(code_content)
+                    chunk_metadata.append({
+                        "file_path": file_path,
+                        "start_line": chunk["start_line"],
+                        "end_line": chunk["end_line"],
+                        "chunk_index": chunk["chunk_index"],
+                        "content_hash": hashlib.sha256(code_content.encode()).hexdigest(),
+                    })
+
+                except Exception as e:
+                    stats["errors"].append(f"Error fetching {file_path}: {str(e)}")
+
+            if not texts_to_embed:
+                continue
+
+            # BGE has 512 token limit. Code ≈ 0.5 tokens/char, so 1000 chars max
+            def truncate_text(text: str, max_chars: int = 1000) -> str:
+                if len(text) > max_chars:
+                    return text[:max_chars] + "..."
+                return text
+            
+            truncated_texts = [truncate_text(t) for t in texts_to_embed]
+            logger.info(f"Embedding {len(truncated_texts)} texts, max len: {max(len(t) for t in truncated_texts)} chars")
+            
+            # Generate embeddings via Together.ai
+            try:
+                embed_response = await http.post(
+                    "https://api.together.xyz/v1/embeddings",
+                    headers={
+                        "Authorization": f"Bearer {together_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": "BAAI/bge-large-en-v1.5",
+                        "input": truncated_texts,
+                    }
+                )
+
+                if embed_response.status_code != 200:
+                    stats["errors"].append(f"Together.ai error: {embed_response.text}")
+                    continue
+
+                embed_data = embed_response.json()
+                embeddings = [item["embedding"] for item in sorted(embed_data["data"], key=lambda x: x["index"])]
+
+                # Store in code_embeddings
+                async with pool.acquire() as conn:
+                    for idx, (embedding, meta) in enumerate(zip(embeddings, chunk_metadata)):
+                        # Check if already exists
+                        existing = await conn.fetchrow(
+                            """
+                            SELECT id, content_hash FROM code_embeddings
+                            WHERE workspace_id = $1::uuid AND repo_full_name = $2
+                            AND file_path = $3 AND chunk_index = $4
+                            """,
+                            workspace_id, repo_full_name, meta["file_path"], meta["chunk_index"]
+                        )
+
+                        if existing and existing["content_hash"] == meta["content_hash"]:
+                            stats["skipped"] += 1
+                            continue
+
+                        # Format embedding as pgvector string
+                        embedding_str = '[' + ','.join(str(x) for x in embedding) + ']'
+                        
+                        # Upsert embedding
+                        await conn.execute(
+                            """
+                            INSERT INTO code_embeddings
+                            (workspace_id, repo_full_name, file_path, commit_sha, chunk_index,
+                             start_line, end_line, content_hash, embedding, language)
+                            VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::vector, $10)
+                            ON CONFLICT (workspace_id, repo_full_name, file_path, chunk_index)
+                            DO UPDATE SET
+                                content_hash = EXCLUDED.content_hash,
+                                embedding = EXCLUDED.embedding,
+                                updated_at = now()
+                            """,
+                            workspace_id, repo_full_name, meta["file_path"], "main",
+                            meta["chunk_index"], meta["start_line"], meta["end_line"],
+                            meta["content_hash"], embedding_str, "python"
+                        )
+                        stats["new_embeddings"] += 1
+
+                logger.info(f"Embedded batch {i//batch_size + 1}: {len(embeddings)} chunks")
+
+            except Exception as e:
+                stats["errors"].append(f"Embedding error: {str(e)}")
+
+    # Get total embeddings count
+    async with pool.acquire() as conn:
+        total = await conn.fetchval(
+            "SELECT COUNT(*) FROM code_embeddings WHERE workspace_id = $1::uuid AND repo_full_name = $2",
+            workspace_id, repo_full_name
+        )
+
+    stats["total_embeddings"] = total or 0
+
+    return {
+        "status": "success",
+        "new_embeddings": stats["new_embeddings"],
+        "skipped": stats["skipped"],
+        "total_embeddings": stats["total_embeddings"],
+        "errors": stats["errors"][:5]  # Limit error messages
     }
 
 

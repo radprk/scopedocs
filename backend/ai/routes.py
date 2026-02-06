@@ -1,21 +1,20 @@
-"""API routes for AI services."""
+"""
+API routes for AI services (MVP version).
+
+Simple endpoints for:
+- Embedding code chunks
+- Getting embedding stats
+- Health check
+"""
 
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-import asyncpg
 
 from ..storage.postgres import get_pool
-from .client import get_client, TogetherClient
 from .embeddings import EmbeddingService, CodeChunk
-from .generation import DocGenerationService
-from .search import SearchService
-from .audiences import (
-    Audience,
-    MultiAudienceDocService,
-    get_audience_profile,
-    list_audiences,
-)
+from .search import RAGSearchService
+from .client import get_client
 
 
 router = APIRouter(prefix="/api/ai", tags=["AI"])
@@ -26,128 +25,19 @@ router = APIRouter(prefix="/api/ai", tags=["AI"])
 # =============================================================================
 
 class EmbedCodeRequest(BaseModel):
+    """Request to embed code chunks."""
     workspace_id: str
     repo_full_name: str
     commit_sha: str
-    chunks: List[Dict[str, Any]]  # List of {file_path, content, start_line, end_line, chunk_index, language}
+    chunks: List[Dict[str, Any]]  # [{file_path, content, start_line, end_line, chunk_index, language}]
 
 
 class EmbedCodeResponse(BaseModel):
+    """Response from embedding code chunks."""
     total_chunks: int
     new_chunks: int
     unchanged_chunks: int
     errors: List[str]
-
-
-class GenerateDocRequest(BaseModel):
-    workspace_id: str
-    repo_full_name: str
-    file_path: str
-    code: str
-    language: str
-    commit_sha: str
-
-
-class GenerateDocResponse(BaseModel):
-    id: str
-    title: str
-    content: str
-    doc_type: str
-
-
-class SearchRequest(BaseModel):
-    workspace_id: str
-    query: str
-    repo_full_name: Optional[str] = None
-    search_type: Optional[str] = None  # 'code', 'docs', 'messages', 'all'
-    limit: int = 10
-
-
-class SearchResultItem(BaseModel):
-    id: str
-    source_type: str
-    content: str
-    file_path: Optional[str]
-    repo_full_name: str
-    start_line: Optional[int]
-    end_line: Optional[int]
-    score: float
-    metadata: Dict[str, Any]
-
-
-class SearchResponse(BaseModel):
-    results: List[SearchResultItem]
-    query: str
-    total_found: int
-
-
-class ChatRequest(BaseModel):
-    workspace_id: str
-    question: str
-    session_id: Optional[str] = None
-    repo_full_name: Optional[str] = None
-
-
-class ChatResponse(BaseModel):
-    answer: str
-    sources: List[Dict[str, Any]]
-    session_id: str
-
-
-class DocCodeLinkResponse(BaseModel):
-    doc_id: str
-    doc_section: Optional[str]
-    file_path: str
-    code_line_start: int
-    code_line_end: int
-    link_type: str
-    confidence: float
-
-
-class GenerateAudienceDocRequest(BaseModel):
-    workspace_id: str
-    repo_full_name: str
-    file_path: str
-    code: str
-    language: str
-    commit_sha: str
-    audience: str  # one of: non_technical, data_ai_engineer, backend_engineer, frontend_designer
-    context: Optional[Dict[str, Any]] = None  # git_history, related_files, readme
-
-
-class GenerateAllAudiencesRequest(BaseModel):
-    workspace_id: str
-    repo_full_name: str
-    file_path: str
-    code: str
-    language: str
-    commit_sha: str
-    context: Optional[Dict[str, Any]] = None
-
-
-class GenerateRepoOverviewRequest(BaseModel):
-    workspace_id: str
-    repo_full_name: str
-    readme_content: Optional[str] = None
-    file_summaries: List[Dict[str, str]]  # [{"path": "...", "summary": "..."}]
-    commit_sha: str
-    git_history: Optional[str] = None
-    audience: Optional[str] = None  # if None, generate for all
-
-
-class AudienceDocResponse(BaseModel):
-    audience: str
-    audience_name: str
-    doc_id: str
-    title: str
-    content: str
-    doc_type: str
-
-
-class AudienceInfo(BaseModel):
-    id: str
-    name: str
-    description: str
 
 
 # =============================================================================
@@ -160,8 +50,30 @@ async def embed_code_chunks(request: EmbedCodeRequest):
     Embed code chunks and store in pgvector.
 
     This is the main endpoint for indexing code with embeddings.
-    Only re-embeds chunks that have changed.
+    Only re-embeds chunks that have changed (based on content hash).
+
+    Example request:
+    {
+        "workspace_id": "uuid-here",
+        "repo_full_name": "owner/repo",
+        "commit_sha": "abc123",
+        "chunks": [
+            {
+                "file_path": "backend/models.py",
+                "content": "class User:\\n    ...",
+                "start_line": 1,
+                "end_line": 25,
+                "chunk_index": 0,
+                "language": "python"
+            }
+        ]
+    }
     """
+    print(f"\n[API] POST /api/ai/embed/code")
+    print(f"  workspace_id: {request.workspace_id}")
+    print(f"  repo: {request.repo_full_name}")
+    print(f"  chunks to process: {len(request.chunks)}")
+
     pool = await get_pool()
     service = EmbeddingService(pool)
 
@@ -175,7 +87,6 @@ async def embed_code_chunks(request: EmbedCodeRequest):
             end_line=c["end_line"],
             chunk_index=c["chunk_index"],
             language=c.get("language", "unknown"),
-            symbol_names=c.get("symbol_names"),
         ))
 
     result = await service.embed_code_chunks(
@@ -185,212 +96,9 @@ async def embed_code_chunks(request: EmbedCodeRequest):
         chunks=chunks,
     )
 
+    print(f"  Result: {result['new_chunks']} new, {result['unchanged_chunks']} unchanged")
+
     return EmbedCodeResponse(**result)
-
-
-@router.post("/generate/doc", response_model=GenerateDocResponse)
-async def generate_file_doc(request: GenerateDocRequest):
-    """
-    Generate documentation for a file.
-
-    Uses the LLM to generate markdown documentation,
-    then stores it with embeddings for search.
-    """
-    pool = await get_pool()
-    gen_service = DocGenerationService(pool)
-    embed_service = EmbeddingService(pool)
-
-    # Generate the doc
-    doc = await gen_service.generate_file_doc(
-        workspace_id=request.workspace_id,
-        repo_full_name=request.repo_full_name,
-        file_path=request.file_path,
-        code=request.code,
-        language=request.language,
-        commit_sha=request.commit_sha,
-    )
-
-    # Embed the generated doc for search
-    await embed_service.embed_document(
-        workspace_id=request.workspace_id,
-        doc_id=doc.id,
-        content=doc.content,
-    )
-
-    return GenerateDocResponse(
-        id=doc.id,
-        title=doc.title,
-        content=doc.content,
-        doc_type=doc.doc_type,
-    )
-
-
-@router.post("/search", response_model=SearchResponse)
-async def search(request: SearchRequest):
-    """
-    Semantic search across code, docs, and messages.
-
-    Set search_type to filter results:
-    - 'code': Search code chunks only
-    - 'docs': Search generated docs only
-    - 'messages': Search Slack/Linear messages only
-    - 'all' or None: Search everything
-    """
-    pool = await get_pool()
-    service = SearchService(pool)
-
-    if request.search_type == "code":
-        response = await service.search_code(
-            workspace_id=request.workspace_id,
-            query=request.query,
-            repo_full_name=request.repo_full_name,
-            limit=request.limit,
-        )
-    elif request.search_type == "docs":
-        response = await service.search_docs(
-            workspace_id=request.workspace_id,
-            query=request.query,
-            repo_full_name=request.repo_full_name,
-            limit=request.limit,
-        )
-    elif request.search_type == "messages":
-        response = await service.search_messages(
-            workspace_id=request.workspace_id,
-            query=request.query,
-            limit=request.limit,
-        )
-    else:
-        # Search all - combine results
-        all_results = await service.search_all(
-            workspace_id=request.workspace_id,
-            query=request.query,
-            repo_full_name=request.repo_full_name,
-            limit=request.limit,
-        )
-
-        # Combine and sort by score
-        combined = []
-        for key in ["code", "docs", "messages"]:
-            combined.extend(all_results[key].results)
-
-        combined.sort(key=lambda x: x.score, reverse=True)
-        combined = combined[: request.limit]
-
-        response = type("SearchResponse", (), {
-            "results": combined,
-            "query": request.query,
-            "total_found": len(combined),
-        })()
-
-    return SearchResponse(
-        results=[
-            SearchResultItem(
-                id=r.id,
-                source_type=r.source_type,
-                content=r.content,
-                file_path=r.file_path,
-                repo_full_name=r.repo_full_name,
-                start_line=r.start_line,
-                end_line=r.end_line,
-                score=r.score,
-                metadata=r.metadata,
-            )
-            for r in response.results
-        ],
-        query=response.query,
-        total_found=response.total_found,
-    )
-
-
-@router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
-    """
-    Chat with the codebase using RAG.
-
-    Retrieves relevant context and generates an answer.
-    Maintains chat history per session.
-    """
-    pool = await get_pool()
-    service = SearchService(pool)
-
-    # Create or get session
-    session_id = request.session_id
-    if not session_id:
-        session_id = await service.create_chat_session(
-            workspace_id=request.workspace_id,
-            repo_full_name=request.repo_full_name,
-        )
-
-    # Get chat history if continuing a session
-    chat_history = None
-    if request.session_id:
-        history = await service.get_chat_history(session_id)
-        chat_history = [
-            {"role": m["role"], "content": m["content"]}
-            for m in history
-        ]
-
-    # Generate answer
-    result = await service.answer_question(
-        workspace_id=request.workspace_id,
-        question=request.question,
-        repo_full_name=request.repo_full_name,
-        chat_history=chat_history,
-    )
-
-    # Save messages to history
-    await service.save_chat_message(
-        workspace_id=request.workspace_id,
-        session_id=session_id,
-        role="user",
-        content=request.question,
-    )
-    await service.save_chat_message(
-        workspace_id=request.workspace_id,
-        session_id=session_id,
-        role="assistant",
-        content=result["answer"],
-        sources=result["sources"],
-    )
-
-    return ChatResponse(
-        answer=result["answer"],
-        sources=result["sources"],
-        session_id=session_id,
-    )
-
-
-@router.get("/docs/{workspace_id}")
-async def list_docs(
-    workspace_id: str,
-    repo_full_name: Optional[str] = None,
-    doc_type: Optional[str] = None,
-):
-    """List generated documentation."""
-    pool = await get_pool()
-    service = DocGenerationService(pool)
-
-    docs = await service.list_docs(
-        workspace_id=workspace_id,
-        repo_full_name=repo_full_name,
-        doc_type=doc_type,
-    )
-
-    return {"docs": docs}
-
-
-@router.get("/docs/{workspace_id}/links/{doc_id}")
-async def get_doc_code_links(workspace_id: str, doc_id: str):
-    """Get code links for a document (doc ↔ code mapping)."""
-    pool = await get_pool()
-    service = DocGenerationService(pool)
-
-    links = await service.get_doc_code_links(
-        workspace_id=workspace_id,
-        doc_id=doc_id,
-    )
-
-    return {"links": links}
 
 
 @router.get("/stats/{workspace_id}")
@@ -398,7 +106,16 @@ async def get_ai_stats(
     workspace_id: str,
     repo_full_name: Optional[str] = None,
 ):
-    """Get embedding and indexing statistics."""
+    """
+    Get embedding and indexing statistics.
+
+    Returns counts of:
+    - Total embeddings
+    - Embeddings per repo
+    - Files indexed
+    """
+    print(f"\n[API] GET /api/ai/stats/{workspace_id}")
+
     pool = await get_pool()
     service = EmbeddingService(pool)
 
@@ -407,244 +124,231 @@ async def get_ai_stats(
         repo_full_name=repo_full_name,
     )
 
+    print(f"  Stats: {stats}")
+
     return {"stats": stats}
 
 
-@router.get("/chat/sessions/{workspace_id}")
-async def list_chat_sessions(workspace_id: str):
-    """List chat sessions for a workspace."""
-    pool = await get_pool()
-
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT id, repo_full_name, title, created_at, updated_at
-            FROM chat_sessions
-            WHERE workspace_id = $1
-            ORDER BY updated_at DESC
-            LIMIT 50
-            """,
-            workspace_id,
-        )
-
-    return {"sessions": [dict(row) for row in rows]}
-
-
-@router.get("/chat/history/{session_id}")
-async def get_chat_session_history(session_id: str):
-    """Get chat history for a session."""
-    pool = await get_pool()
-    service = SearchService(pool)
-
-    history = await service.get_chat_history(session_id)
-
-    return {"messages": history}
-
-
-# =============================================================================
-# Health check for AI services
-# =============================================================================
-
 @router.get("/health")
 async def ai_health():
-    """Check if AI services are configured and working."""
+    """
+    Check if AI services are configured.
+
+    Returns status of:
+    - Together.ai API key configured
+    - Model names being used
+    """
     import os
 
     together_key = os.environ.get("TOGETHER_API_KEY")
 
-    return {
+    status = {
         "together_api_configured": bool(together_key),
         "embedding_model": "BAAI/bge-large-en-v1.5",
-        "generation_model": "Qwen/Qwen2.5-Coder-32B-Instruct",
         "embedding_dimensions": 1024,
     }
 
+    print(f"\n[API] GET /api/ai/health")
+    print(f"  Status: {status}")
+
+    return status
+
 
 # =============================================================================
-# Multi-Audience Documentation Routes
+# RAG Search & Doc Generation (Testing Endpoints)
 # =============================================================================
 
-@router.get("/audiences", response_model=List[AudienceInfo])
-async def get_audiences():
-    """
-    List available documentation audiences.
-
-    Returns the four audience types with their descriptions:
-    - non_technical: Product & Business Stakeholders
-    - data_ai_engineer: Data & AI Engineers
-    - backend_engineer: Backend Engineers
-    - frontend_designer: Frontend Engineers & Designers
-    """
-    return [AudienceInfo(**a) for a in list_audiences()]
+class SearchRequest(BaseModel):
+    """Request for RAG search."""
+    query: str
+    workspace_id: str
+    repo_full_name: Optional[str] = None
+    top_k: int = 5
 
 
-@router.post("/generate/audience", response_model=AudienceDocResponse)
-async def generate_doc_for_audience(request: GenerateAudienceDocRequest):
-    """
-    Generate documentation for a file, tailored to a specific audience.
+class SearchResult(BaseModel):
+    """Single search result."""
+    file_path: str
+    repo_full_name: str
+    start_line: int
+    end_line: int
+    similarity: float
 
-    Each audience gets documentation written from their perspective:
-    - non_technical: Business value, user impact, no code snippets
-    - data_ai_engineer: Embeddings, pipelines, model details
-    - backend_engineer: APIs, schemas, service architecture
-    - frontend_designer: Response formats, states, UI integration
+
+class SearchResponse(BaseModel):
+    """Response from RAG search."""
+    query: str
+    results: List[SearchResult]
+    total_results: int
+
+
+@router.post("/search", response_model=SearchResponse)
+async def search_code(request: SearchRequest):
     """
+    Search code using vector similarity.
+
+    Test this to verify:
+    1. Embeddings are stored correctly
+    2. pgvector search is working
+    3. Results are relevant to the query
+    """
+    print(f"\n[API] POST /api/ai/search")
+    print(f"  query: {request.query[:50]}...")
+    print(f"  workspace_id: {request.workspace_id}")
+
     pool = await get_pool()
-    service = MultiAudienceDocService(pool)
+    search_service = RAGSearchService(pool)
 
-    try:
-        audience = Audience(request.audience)
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid audience. Valid options: {[a.value for a in Audience]}"
-        )
-
-    profile = get_audience_profile(audience)
-
-    doc = await service.generate_for_audience(
-        audience=audience,
+    context = await search_service.search(
+        query=request.query,
         workspace_id=request.workspace_id,
         repo_full_name=request.repo_full_name,
-        file_path=request.file_path,
-        code=request.code,
-        language=request.language,
-        commit_sha=request.commit_sha,
-        context=request.context,
+        top_k=request.top_k,
     )
 
-    return AudienceDocResponse(
-        audience=audience.value,
-        audience_name=profile.display_name,
-        doc_id=doc.id,
-        title=doc.title,
-        content=doc.content,
-        doc_type=doc.doc_type,
-    )
-
-
-@router.post("/generate/all-audiences")
-async def generate_doc_for_all_audiences(request: GenerateAllAudiencesRequest):
-    """
-    Generate documentation for all four audiences in parallel.
-
-    Returns a dict with docs for each audience type.
-    """
-    pool = await get_pool()
-    service = MultiAudienceDocService(pool)
-
-    docs = await service.generate_for_all_audiences(
-        workspace_id=request.workspace_id,
-        repo_full_name=request.repo_full_name,
-        file_path=request.file_path,
-        code=request.code,
-        language=request.language,
-        commit_sha=request.commit_sha,
-        context=request.context,
-    )
-
-    result = {}
-    for audience, doc in docs.items():
-        profile = get_audience_profile(audience)
-        result[audience.value] = {
-            "audience_name": profile.display_name,
-            "doc_id": doc.id,
-            "title": doc.title,
-            "content": doc.content,
-            "doc_type": doc.doc_type,
-        }
-
-    return {"docs": result}
-
-
-@router.post("/generate/repo-overview")
-async def generate_repo_overview_for_audiences(request: GenerateRepoOverviewRequest):
-    """
-    Generate a repository overview for one or all audiences.
-
-    If audience is specified, generates for that audience only.
-    If audience is None, generates for all four audiences.
-    """
-    pool = await get_pool()
-    service = MultiAudienceDocService(pool)
-
-    if request.audience:
-        try:
-            audience = Audience(request.audience)
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid audience. Valid options: {[a.value for a in Audience]}"
-            )
-
-        doc = await service.generate_repo_overview_for_audience(
-            audience=audience,
-            workspace_id=request.workspace_id,
-            repo_full_name=request.repo_full_name,
-            readme_content=request.readme_content,
-            file_summaries=request.file_summaries,
-            commit_sha=request.commit_sha,
-            git_history=request.git_history,
+    results = [
+        SearchResult(
+            file_path=r.file_path,
+            repo_full_name=r.repo_full_name,
+            start_line=r.start_line,
+            end_line=r.end_line,
+            similarity=r.similarity,
         )
+        for r in context.results
+    ]
 
-        profile = get_audience_profile(audience)
-        return {
-            "docs": {
-                audience.value: {
-                    "audience_name": profile.display_name,
-                    "doc_id": doc.id,
-                    "title": doc.title,
-                    "content": doc.content,
-                    "doc_type": doc.doc_type,
-                }
-            }
-        }
+    print(f"  Found {len(results)} results")
+    for r in results[:3]:
+        print(f"    - {r.file_path}:{r.start_line} (sim={r.similarity:.3f})")
+
+    return SearchResponse(
+        query=request.query,
+        results=results,
+        total_results=len(results),
+    )
+
+
+class GenerateDocRequest(BaseModel):
+    """Request to generate documentation."""
+    workspace_id: str
+    repo_full_name: str
+    doc_type: str = "overview"  # overview, file, module
+    file_path: Optional[str] = None  # Required for file/module docs
+    query: Optional[str] = None  # What to document
+
+
+class GenerateDocResponse(BaseModel):
+    """Generated documentation."""
+    title: str
+    content: str  # Markdown
+    references: Dict[str, Any]
+    token_estimate: int
+
+
+@router.post("/generate-doc", response_model=GenerateDocResponse)
+async def generate_documentation(request: GenerateDocRequest):
+    """
+    Generate documentation using RAG + LLM.
+
+    This:
+    1. Searches for relevant code chunks
+    2. Assembles context
+    3. Calls LLM to generate documentation
+    4. Returns markdown with [n] references
+    """
+    print(f"\n[API] POST /api/ai/generate-doc")
+    print(f"  workspace_id: {request.workspace_id}")
+    print(f"  repo: {request.repo_full_name}")
+    print(f"  doc_type: {request.doc_type}")
+
+    pool = await get_pool()
+    client = get_client()
+    search_service = RAGSearchService(pool, client)
+
+    # Build search query based on doc_type
+    if request.doc_type == "overview":
+        search_query = f"Main entry point, architecture, how {request.repo_full_name} works"
+    elif request.doc_type == "file" and request.file_path:
+        search_query = f"Code in {request.file_path}, what it does, functions, classes"
+    elif request.query:
+        search_query = request.query
     else:
-        docs = await service.generate_all_repo_overviews(
-            workspace_id=request.workspace_id,
-            repo_full_name=request.repo_full_name,
-            readme_content=request.readme_content,
-            file_summaries=request.file_summaries,
-            commit_sha=request.commit_sha,
-            git_history=request.git_history,
-        )
+        search_query = f"How does {request.repo_full_name} work?"
 
-        result = {}
-        for audience, doc in docs.items():
-            profile = get_audience_profile(audience)
-            result[audience.value] = {
-                "audience_name": profile.display_name,
-                "doc_id": doc.id,
-                "title": doc.title,
-                "content": doc.content,
-                "doc_type": doc.doc_type,
-            }
-
-        return {"docs": result}
-
-
-@router.get("/docs/audience/{workspace_id}/{audience}")
-async def list_docs_by_audience(
-    workspace_id: str,
-    audience: str,
-    repo_full_name: Optional[str] = None,
-):
-    """List generated documentation for a specific audience."""
-    pool = await get_pool()
-    service = MultiAudienceDocService(pool)
-
-    try:
-        audience_enum = Audience(audience)
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid audience. Valid options: {[a.value for a in Audience]}"
-        )
-
-    docs = await service.get_docs_by_audience(
-        workspace_id=workspace_id,
-        audience=audience_enum,
-        repo_full_name=repo_full_name,
+    # Search for relevant code
+    context = await search_service.search(
+        query=search_query,
+        workspace_id=request.workspace_id,
+        repo_full_name=request.repo_full_name,
+        top_k=8,
     )
 
-    return {"docs": docs}
+    if not context.results:
+        raise HTTPException(
+            status_code=404,
+            detail="No code chunks found. Run indexing and embeddings first."
+        )
+
+    # Format context for LLM
+    context_parts = []
+    references = {}
+    for i, result in enumerate(context.results):
+        ref = f"[{i+1}]"
+        references[ref] = {
+            "file_path": result.file_path,
+            "start_line": result.start_line,
+            "end_line": result.end_line,
+        }
+        context_parts.append(f"{ref} {result.file_path}:{result.start_line}-{result.end_line}")
+
+    context_summary = "\n".join(context_parts)
+
+    # Generate doc with LLM
+    prompt = f"""You are documenting a codebase. Based on the code locations below, generate clear documentation.
+
+Code locations found (most relevant to query "{search_query}"):
+{context_summary}
+
+Generate a markdown document that:
+1. Explains what this code does
+2. References specific files using [n] notation
+3. Is concise but thorough
+
+Title the document appropriately for doc_type="{request.doc_type}".
+"""
+
+    print(f"  Calling LLM with {len(context.results)} code references...")
+
+    try:
+        result = await client.generate(
+            prompt=prompt,
+            max_tokens=1500,
+        )
+        doc_content = result.text
+    except Exception as e:
+        error_msg = str(e)
+        print(f"  LLM error: {error_msg}")
+        return GenerateDocResponse(
+            title="Generation Error",
+            content=f"Failed to generate documentation: {error_msg}",
+            references=references,
+            token_estimate=0,
+        )
+
+    # Extract title from first line if it's a heading
+    lines = doc_content.strip().split("\n")
+    if lines[0].startswith("# "):
+        title = lines[0][2:].strip()
+        content = "\n".join(lines[1:]).strip()
+    else:
+        title = f"{request.doc_type.title()} Documentation"
+        content = doc_content
+
+    print(f"  Generated doc: {len(content)} chars")
+
+    return GenerateDocResponse(
+        title=title,
+        content=content,
+        references=references,
+        token_estimate=len(content.split()) + len(prompt.split()),
+    )

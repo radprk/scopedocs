@@ -1,0 +1,987 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ScopeDocs – Pipeline Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0d1117;
+      color: #c9d1d9;
+      line-height: 1.6;
+      padding: 2rem;
+    }
+
+    h1 { color: #58a6ff; margin-bottom: 0.5rem; }
+    h2 { color: #8b949e; font-size: 1rem; margin-bottom: 1rem; }
+    h3 { color: #58a6ff; font-size: 0.9rem; margin: 1rem 0 0.5rem; }
+
+    .container { max-width: 1200px; margin: 0 auto; }
+
+    /* Controls */
+    .controls {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1.5rem;
+      display: flex;
+      gap: 1rem;
+      align-items: flex-end;
+      flex-wrap: wrap;
+    }
+
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .control-group label {
+      font-size: 0.75rem;
+      color: #8b949e;
+      text-transform: uppercase;
+    }
+
+    select, input {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #c9d1d9;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.875rem;
+      min-width: 200px;
+    }
+
+    select:focus, input:focus {
+      outline: none;
+      border-color: #58a6ff;
+    }
+
+    button {
+      background: #238636;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      padding: 0.5rem 1rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    button:hover { background: #2ea043; }
+    button:disabled { background: #30363d; cursor: not-allowed; }
+    button.secondary { background: #21262d; }
+    button.secondary:hover { background: #30363d; }
+
+    /* Pipeline stages */
+    .pipeline {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+      overflow-x: auto;
+      padding: 0.5rem 0;
+    }
+
+    .stage {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      min-width: 140px;
+      text-align: center;
+    }
+
+    .stage.active { border-color: #58a6ff; background: #1f2937; }
+    .stage.completed { border-color: #238636; }
+
+    .stage-number {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      background: #30363d;
+      border-radius: 50%;
+      font-size: 0.75rem;
+      font-weight: bold;
+      margin-bottom: 0.25rem;
+    }
+
+    .stage.completed .stage-number { background: #238636; }
+    .stage.active .stage-number { background: #58a6ff; }
+
+    .stage-name { font-weight: 500; font-size: 0.85rem; }
+    .stage-count { font-size: 0.75rem; color: #8b949e; margin-top: 0.25rem; }
+
+    .arrow {
+      display: flex;
+      align-items: center;
+      color: #30363d;
+      font-size: 1.2rem;
+    }
+
+    /* Log output */
+    .log-section {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+    }
+
+    .log-header {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid #30363d;
+      font-weight: 500;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .log-content {
+      padding: 1rem;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      font-size: 0.8rem;
+      max-height: 300px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+
+    .log-entry { margin-bottom: 0.25rem; }
+    .log-entry.info { color: #58a6ff; }
+    .log-entry.success { color: #3fb950; }
+    .log-entry.error { color: #f85149; }
+    .log-entry.data { color: #a5d6ff; }
+
+    .timestamp { color: #6e7681; margin-right: 0.5rem; }
+
+    /* Split view */
+    .split-view {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+
+    @media (max-width: 900px) {
+      .split-view { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .panel-header {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid #30363d;
+      font-weight: 500;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .panel-content {
+      padding: 1rem;
+      max-height: 500px;
+      overflow: auto;
+    }
+
+    /* Code display */
+    .code-block {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      background: #0d1117;
+      border-radius: 6px;
+      padding: 1rem;
+      overflow-x: auto;
+    }
+
+    .code-line {
+      display: block;
+      padding: 0 0.5rem;
+    }
+
+    .code-line:hover { background: #1f2937; }
+    .code-line.highlight { background: rgba(56, 139, 253, 0.15); border-left: 2px solid #58a6ff; }
+
+    .line-number {
+      display: inline-block;
+      width: 3em;
+      color: #6e7681;
+      user-select: none;
+      text-align: right;
+      padding-right: 1em;
+    }
+
+    /* Markdown rendering */
+    .markdown h1 { font-size: 1.3rem; margin: 1rem 0 0.5rem; }
+    .markdown h2 { font-size: 1.1rem; margin: 0.75rem 0 0.5rem; color: #58a6ff; }
+    .markdown p { margin: 0.5rem 0; }
+    .markdown ul { margin: 0.5rem 0; padding-left: 1.5rem; }
+    .markdown code {
+      background: #0d1117;
+      padding: 0.1rem 0.3rem;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85em;
+    }
+
+    /* Reference links */
+    .ref-link {
+      color: #58a6ff;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+    .ref-link:hover { color: #79c0ff; }
+
+    /* Chunk cards */
+    .chunk-card {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 0.75rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .chunk-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      color: #8b949e;
+      margin-bottom: 0.5rem;
+    }
+
+    .chunk-preview {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      color: #a5d6ff;
+      white-space: pre-wrap;
+      max-height: 60px;
+      overflow: hidden;
+    }
+
+    /* Embedding display */
+    .embedding-preview {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.7rem;
+      color: #7ee787;
+      background: #0d1117;
+      padding: 0.5rem;
+      border-radius: 4px;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>ScopeDocs Pipeline Viewer</h1>
+    <h2>See real data flow through each stage</h2>
+
+    <!-- Controls -->
+    <div class="controls">
+      <div class="control-group">
+        <label>Workspace</label>
+        <select id="workspace-select" onchange="onWorkspaceChange()">
+          <option value="">Loading...</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label>Repository</label>
+        <select id="repo-select" onchange="onRepoChange()">
+          <option value="">Select workspace first</option>
+        </select>
+      </div>
+      <button onclick="runIndexing()" id="btn-index">
+        1. Index Repository
+      </button>
+      <button onclick="generateEmbeddings()" id="btn-embed" class="secondary">
+        2. Generate Embeddings
+      </button>
+      <button onclick="searchCode()" id="btn-search" class="secondary">
+        3. Test Search
+      </button>
+      <button onclick="generateDoc()" id="btn-doc" class="secondary">
+        4. Generate Doc
+      </button>
+    </div>
+
+    <!-- Pipeline visualization -->
+    <div class="pipeline">
+      <div class="stage" id="stage-1">
+        <div class="stage-number">1</div>
+        <div class="stage-name">Fetch Files</div>
+        <div class="stage-count" id="count-files">-</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="stage" id="stage-2">
+        <div class="stage-number">2</div>
+        <div class="stage-name">Chunk Code</div>
+        <div class="stage-count" id="count-chunks">-</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="stage" id="stage-3">
+        <div class="stage-number">3</div>
+        <div class="stage-name">Embeddings</div>
+        <div class="stage-count" id="count-embeddings">-</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="stage" id="stage-4">
+        <div class="stage-number">4</div>
+        <div class="stage-name">Documentation</div>
+        <div class="stage-count" id="count-docs">-</div>
+      </div>
+    </div>
+
+    <!-- Log output -->
+    <div class="log-section">
+      <div class="log-header">
+        <span>Pipeline Log</span>
+        <button onclick="clearLog()" class="secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">Clear</button>
+      </div>
+      <div class="log-content" id="log-output">
+        <div class="log-entry info">Ready. Select a workspace and repository to begin.</div>
+      </div>
+    </div>
+
+    <!-- Split view: Chunks and Code -->
+    <div class="split-view">
+      <!-- Left: Documentation -->
+      <div class="panel">
+        <div class="panel-header">
+          <span>Generated Documentation</span>
+          <span id="doc-title" style="font-size: 0.8rem; color: #8b949e;">sample_doc.md</span>
+        </div>
+        <div class="panel-content markdown" id="doc-content">
+          <p style="color: #8b949e;">Click "View Documentation" to load sample_doc.md</p>
+          <p style="font-size: 0.8rem; color: #6e7681;">References like [1] are clickable and will show the source code.</p>
+        </div>
+      </div>
+
+      <!-- Right: Code -->
+      <div class="panel">
+        <div class="panel-header">
+          <span>Source Code</span>
+          <span id="code-file" style="font-size: 0.8rem; font-family: monospace; color: #8b949e;">-</span>
+        </div>
+        <div class="panel-content">
+          <div class="code-block" id="code-content">
+            <span style="color: #6e7681;">Click a reference [n] in the documentation to view source code here.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chunk viewer -->
+    <div class="log-section" style="margin-top: 1rem;">
+      <div class="log-header">
+        <span>Code Chunks</span>
+        <span id="chunk-count-display" style="font-size: 0.8rem; color: #8b949e;">0 chunks</span>
+      </div>
+      <div class="panel-content" id="chunks-list" style="max-height: 300px;">
+        <p style="color: #6e7681;">Chunks will appear here after indexing.</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = window.location.origin;
+    let workspaceId = null;
+    let repoFullName = null;
+    let references = {};
+
+    // ==========================================================================
+    // Logging
+    // ==========================================================================
+    function log(message, type = '') {
+      const output = document.getElementById('log-output');
+      const time = new Date().toLocaleTimeString();
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${type}`;
+      entry.innerHTML = `<span class="timestamp">[${time}]</span>${escapeHtml(message)}`;
+      output.appendChild(entry);
+      output.scrollTop = output.scrollHeight;
+    }
+
+    function logData(label, data) {
+      const output = document.getElementById('log-output');
+      const time = new Date().toLocaleTimeString();
+      const entry = document.createElement('div');
+      entry.className = 'log-entry data';
+
+      let dataStr;
+      if (typeof data === 'object') {
+        dataStr = JSON.stringify(data, null, 2);
+      } else {
+        dataStr = String(data);
+      }
+
+      entry.innerHTML = `<span class="timestamp">[${time}]</span>${escapeHtml(label)}:\n${escapeHtml(dataStr)}`;
+      output.appendChild(entry);
+      output.scrollTop = output.scrollHeight;
+    }
+
+    function clearLog() {
+      document.getElementById('log-output').innerHTML = '<div class="log-entry info">Log cleared.</div>';
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // ==========================================================================
+    // Stage updates
+    // ==========================================================================
+    function setStage(num, status) {
+      for (let i = 1; i <= 4; i++) {
+        const el = document.getElementById(`stage-${i}`);
+        el.classList.remove('active', 'completed');
+      }
+
+      for (let i = 1; i < num; i++) {
+        document.getElementById(`stage-${i}`).classList.add('completed');
+      }
+
+      if (status === 'active') {
+        document.getElementById(`stage-${num}`).classList.add('active');
+      } else if (status === 'completed') {
+        document.getElementById(`stage-${num}`).classList.add('completed');
+      }
+    }
+
+    function updateCount(id, value) {
+      document.getElementById(id).textContent = value;
+    }
+
+    // ==========================================================================
+    // Initialization
+    // ==========================================================================
+    async function init() {
+      log('Initializing...', 'info');
+      await loadWorkspaces();
+    }
+
+    async function loadWorkspaces() {
+      try {
+        const res = await fetch(`${API}/api/workspaces`);
+        const data = await res.json();
+        const select = document.getElementById('workspace-select');
+
+        if (!data.workspaces || data.workspaces.length === 0) {
+          select.innerHTML = '<option value="">No workspaces found</option>';
+          log('No workspaces found. Create one first.', 'error');
+          return;
+        }
+
+        select.innerHTML = '<option value="">Select workspace...</option>' +
+          data.workspaces.map(w => `<option value="${w.id}">${w.name}</option>`).join('');
+
+        log(`Loaded ${data.workspaces.length} workspace(s)`, 'success');
+      } catch (e) {
+        log(`Error loading workspaces: ${e.message}`, 'error');
+      }
+    }
+
+    async function onWorkspaceChange() {
+      const select = document.getElementById('workspace-select');
+      workspaceId = select.value;
+
+      if (!workspaceId) {
+        document.getElementById('repo-select').innerHTML = '<option value="">Select workspace first</option>';
+        return;
+      }
+
+      log(`Selected workspace: ${workspaceId}`, 'info');
+      await loadRepos();
+    }
+
+    async function loadRepos() {
+      const select = document.getElementById('repo-select');
+      select.innerHTML = '<option value="">Loading repos...</option>';
+
+      try {
+        const res = await fetch(`${API}/api/github/repos/${workspaceId}`);
+
+        if (res.status === 404) {
+          select.innerHTML = '<option value="">Connect GitHub first</option>';
+          log('GitHub not connected. Click GitHub button in main UI to connect.', 'error');
+          return;
+        }
+
+        const data = await res.json();
+
+        if (!data.repos || data.repos.length === 0) {
+          select.innerHTML = '<option value="">No repos found</option>';
+          return;
+        }
+
+        select.innerHTML = '<option value="">Select repository...</option>' +
+          data.repos.map(r => `<option value="${r.full_name}">${r.full_name}</option>`).join('');
+
+        log(`Loaded ${data.repos.length} repositories`, 'success');
+      } catch (e) {
+        select.innerHTML = '<option value="">Error loading repos</option>';
+        log(`Error loading repos: ${e.message}`, 'error');
+      }
+    }
+
+    function onRepoChange() {
+      const select = document.getElementById('repo-select');
+      repoFullName = select.value;
+      if (repoFullName) {
+        log(`Selected repository: ${repoFullName}`, 'info');
+      }
+    }
+
+    // ==========================================================================
+    // Pipeline stages
+    // ==========================================================================
+    async function runIndexing() {
+      if (!workspaceId || !repoFullName) {
+        log('Please select a workspace and repository first', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('btn-index');
+      btn.disabled = true;
+      btn.textContent = 'Indexing...';
+
+      setStage(1, 'active');
+      log(`Starting indexing for ${repoFullName}...`, 'info');
+
+      try {
+        const res = await fetch(`${API}/api/index/repo`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspace_id: workspaceId,
+            repo_full_name: repoFullName
+          })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.detail || 'Indexing failed');
+        }
+
+        // Update stage 1
+        setStage(1, 'completed');
+        updateCount('count-files', `${data.stats.files_indexed} files`);
+        log(`Fetched ${data.stats.files_indexed} Python files`, 'success');
+
+        // Update stage 2
+        setStage(2, 'completed');
+        updateCount('count-chunks', `${data.stats.chunks_created} chunks`);
+        log(`Created ${data.stats.chunks_created} code chunks`, 'success');
+
+        if (data.stats.errors && data.stats.errors.length > 0) {
+          data.stats.errors.forEach(e => log(`Error: ${e}`, 'error'));
+        }
+
+        // Show sample chunks
+        logData('Sample indexing result', {
+          repo_id: data.repo_id,
+          branch: data.branch,
+          files_indexed: data.stats.files_indexed,
+          chunks_created: data.stats.chunks_created
+        });
+
+        // Load chunks
+        await loadChunks();
+
+      } catch (e) {
+        log(`Indexing error: ${e.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '1. Index Repository';
+      }
+    }
+
+    async function loadChunks() {
+      try {
+        const res = await fetch(`${API}/api/index/chunks/${workspaceId}?limit=20`);
+        const data = await res.json();
+
+        const list = document.getElementById('chunks-list');
+        document.getElementById('chunk-count-display').textContent = `${data.total_chunks} chunks`;
+
+        if (!data.files || data.files.length === 0) {
+          list.innerHTML = '<p style="color: #6e7681;">No chunks found.</p>';
+          return;
+        }
+
+        list.innerHTML = data.files.map(file => `
+          <div class="chunk-card">
+            <div class="chunk-header">
+              <span style="color: #58a6ff;">${file.file_path}</span>
+              <span>${file.chunks.length} chunk(s)</span>
+            </div>
+            ${file.chunks.slice(0, 2).map(c => `
+              <div style="font-size: 0.75rem; color: #8b949e; margin-top: 0.25rem;">
+                Chunk ${c.chunk_index}: lines ${c.start_line}-${c.end_line}
+                <span style="color: #6e7681; font-family: monospace;">(${c.chunk_hash.slice(0, 8)}...)</span>
+              </div>
+            `).join('')}
+            ${file.chunks.length > 2 ? `<div style="font-size: 0.7rem; color: #6e7681;">...and ${file.chunks.length - 2} more</div>` : ''}
+          </div>
+        `).join('');
+
+        // Log first chunk details
+        if (data.files[0] && data.files[0].chunks[0]) {
+          const firstChunk = data.files[0].chunks[0];
+          log(`Sample chunk from ${data.files[0].file_path}:`, 'info');
+          logData('Chunk metadata', {
+            file: data.files[0].file_path,
+            chunk_index: firstChunk.chunk_index,
+            lines: `${firstChunk.start_line}-${firstChunk.end_line}`,
+            hash: firstChunk.chunk_hash
+          });
+        }
+
+      } catch (e) {
+        log(`Error loading chunks: ${e.message}`, 'error');
+      }
+    }
+
+    async function generateEmbeddings() {
+      if (!workspaceId || !repoFullName) {
+        log('Please select a workspace and repository first', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('btn-embed');
+      btn.disabled = true;
+      btn.textContent = 'Generating...';
+
+      setStage(3, 'active');
+      log('Generating embeddings with Together.ai (BAAI/bge-large-en-v1.5)...', 'info');
+
+      try {
+        // Check if API key is configured
+        const healthRes = await fetch(`${API}/api/ai/health`);
+        const health = await healthRes.json();
+
+        if (!health.together_api_configured) {
+          log('TOGETHER_API_KEY not set. Embeddings require API key.', 'error');
+          log('Set TOGETHER_API_KEY environment variable and restart server.', 'info');
+          return;
+        }
+
+        logData('AI service config', health);
+
+        // Call the actual embeddings endpoint
+        const res = await fetch(`${API}/api/index/embed`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspace_id: workspaceId,
+            repo_full_name: repoFullName
+          })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.detail || 'Embedding failed');
+        }
+
+        log(`Embedded ${data.new_embeddings} new chunks (${data.skipped} unchanged)`, 'success');
+        logData('Embedding result', data);
+
+        setStage(3, 'completed');
+        updateCount('count-embeddings', `${data.total_embeddings} vectors`);
+
+      } catch (e) {
+        log(`Embedding error: ${e.message}`, 'error');
+        log('Make sure code_embeddings table exists in Supabase', 'info');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '2. Generate Embeddings';
+      }
+    }
+
+    async function searchCode() {
+      if (!workspaceId) {
+        log('Please select a workspace first', 'error');
+        return;
+      }
+
+      const query = prompt('Enter search query:', 'How does the server handle requests?');
+      if (!query) return;
+
+      const btn = document.getElementById('btn-search');
+      btn.disabled = true;
+      btn.textContent = 'Searching...';
+
+      log(`Searching for: "${query}"`, 'info');
+
+      try {
+        const res = await fetch(`${API}/api/ai/search`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: query,
+            workspace_id: workspaceId,
+            repo_full_name: repoFullName,
+            top_k: 5
+          })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.detail || 'Search failed');
+        }
+
+        log(`Found ${data.total_results} results`, 'success');
+
+        if (data.results && data.results.length > 0) {
+          data.results.forEach((r, i) => {
+            log(`  [${i+1}] ${r.file_path}:${r.start_line}-${r.end_line} (similarity: ${r.similarity.toFixed(3)})`, 'data');
+          });
+
+          // Store as references for clicking
+          references = {};
+          data.results.forEach((r, i) => {
+            references[`[${i+1}]`] = {
+              file_path: r.file_path,
+              start_line: r.start_line,
+              end_line: r.end_line
+            };
+          });
+        } else {
+          log('No results found. Make sure embeddings exist in code_embeddings table.', 'info');
+        }
+
+      } catch (e) {
+        log(`Search error: ${e.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '3. Test Search';
+      }
+    }
+
+    async function generateDoc() {
+      if (!workspaceId || !repoFullName) {
+        log('Please select a workspace and repository first', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('btn-doc');
+      btn.disabled = true;
+      btn.textContent = 'Generating...';
+
+      setStage(4, 'active');
+      log('Generating documentation with LLM (Qwen2.5-Coder-32B)...', 'info');
+
+      try {
+        const res = await fetch(`${API}/api/ai/generate-doc`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspace_id: workspaceId,
+            repo_full_name: repoFullName,
+            doc_type: 'overview'
+          })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.detail || 'Generation failed');
+        }
+
+        log(`Generated: "${data.title}" (${data.content.length} chars)`, 'success');
+        logData('Token estimate', data.token_estimate);
+
+        // Store references
+        references = data.references;
+
+        // Render the documentation
+        const rendered = renderMarkdown(`# ${data.title}\n\n${data.content}`);
+        document.getElementById('doc-content').innerHTML = rendered;
+        document.getElementById('doc-title').textContent = data.title;
+
+        setStage(4, 'completed');
+        updateCount('count-docs', '1 doc');
+
+      } catch (e) {
+        log(`Generation error: ${e.message}`, 'error');
+        log('Make sure: 1) Embeddings exist, 2) TOGETHER_API_KEY is set', 'info');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '4. Generate Doc';
+      }
+    }
+
+    async function loadSampleDoc() {
+      setStage(4, 'active');
+      log('Loading sample documentation...', 'info');
+
+      try {
+        // Load from /output/sample_doc.md
+        const docRes = await fetch(`${API}/output/sample_doc.md`);
+        let docContent;
+
+        if (docRes.ok) {
+          docContent = await docRes.text();
+          log('Loaded sample_doc.md from /output/', 'success');
+        } else {
+          // Use inline sample if file doesn't exist
+          docContent = getSampleDoc();
+          log('Using inline sample documentation', 'info');
+        }
+
+        // Load references
+        try {
+          const refRes = await fetch(`${API}/output/references.json`);
+          if (refRes.ok) {
+            references = await refRes.json();
+            log(`Loaded ${Object.keys(references).length} code references`, 'success');
+          }
+        } catch {
+          references = getSampleReferences();
+          log('Using inline sample references', 'info');
+        }
+
+        // Render markdown with clickable references
+        const rendered = renderMarkdown(docContent);
+        document.getElementById('doc-content').innerHTML = rendered;
+
+        setStage(4, 'completed');
+        updateCount('count-docs', '1 doc');
+
+        logData('References loaded', Object.keys(references));
+
+      } catch (e) {
+        log(`Error loading documentation: ${e.message}`, 'error');
+      }
+    }
+
+    function getSampleDoc() {
+      return `# ScopeDocs Architecture
+
+ScopeDocs is a FastAPI-based backend for generating living documentation.[1]
+
+## Data Models
+
+The system uses Pydantic models defined in backend/models.py.[2]
+
+Key models include:
+- WorkItem: Represents Linear issues
+- PullRequest: Represents GitHub PRs
+- Conversation: Represents Slack threads
+
+## Code Chunking
+
+Code is chunked using AST-aware parsing in code-indexing/src/indexing/chunker.py.[3]
+The chunker preserves function and class boundaries.[4]
+
+## Storage
+
+Data is stored in PostgreSQL with pgvector for embeddings.[5]
+The storage layer handles workspace isolation and OAuth tokens.
+
+## API Endpoints
+
+Main endpoints are defined in backend/server.py:[6]
+- /api/workspaces - Workspace management
+- /api/oauth/{provider}/connect - OAuth flow
+- /api/index/repo - Code indexing
+- /api/ai/embed/code - Generate embeddings`;
+    }
+
+    function getSampleReferences() {
+      return {
+        "[1]": { "file_path": "backend/server.py", "start_line": 1, "end_line": 15 },
+        "[2]": { "file_path": "backend/models.py", "start_line": 1, "end_line": 30 },
+        "[3]": { "file_path": "code-indexing/src/indexing/chunker.py", "start_line": 1, "end_line": 50 },
+        "[4]": { "file_path": "code-indexing/src/indexing/chunker.py", "start_line": 104, "end_line": 130 },
+        "[5]": { "file_path": "db/schema.sql", "start_line": 1, "end_line": 40 },
+        "[6]": { "file_path": "backend/server.py", "start_line": 58, "end_line": 80 }
+      };
+    }
+
+    function renderMarkdown(md) {
+      // Simple markdown to HTML
+      let html = md
+        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/`(.+?)`/g, '<code>$1</code>')
+        .replace(/^- (.+)$/gm, '<li>$1</li>')
+        .replace(/\n\n/g, '</p><p>')
+        .replace(/\n/g, '<br>');
+
+      // Make references clickable
+      html = html.replace(/\[(\d+)\]/g, '<span class="ref-link" onclick="loadReference(\'[$1]\')">[$1]</span>');
+
+      return `<p>${html}</p>`;
+    }
+
+    async function loadReference(ref) {
+      const refData = references[ref];
+
+      if (!refData) {
+        log(`Reference ${ref} not found`, 'error');
+        return;
+      }
+
+      log(`Loading ${ref}: ${refData.file_path} lines ${refData.start_line}-${refData.end_line}`, 'info');
+      document.getElementById('code-file').textContent = refData.file_path;
+
+      try {
+        // Try to fetch from GitHub via our API
+        if (workspaceId && repoFullName) {
+          const res = await fetch(
+            `${API}/api/index/chunk-content/${workspaceId}?` +
+            `repo_full_name=${encodeURIComponent(repoFullName)}&` +
+            `file_path=${encodeURIComponent(refData.file_path)}&` +
+            `start_line=${refData.start_line}&` +
+            `end_line=${refData.end_line}`
+          );
+
+          if (res.ok) {
+            const data = await res.json();
+            displayCode(data.content, refData.start_line);
+            log(`Loaded ${refData.end_line - refData.start_line + 1} lines from GitHub`, 'success');
+            return;
+          }
+        }
+
+        // Fallback: show placeholder
+        displayCode(`// Code from ${refData.file_path}\n// Lines ${refData.start_line}-${refData.end_line}\n// (Connect GitHub and index repo to load actual code)`, 1);
+
+      } catch (e) {
+        log(`Error loading code: ${e.message}`, 'error');
+        displayCode(`// Error loading ${refData.file_path}\n// ${e.message}`, 1);
+      }
+    }
+
+    function displayCode(content, startLine) {
+      const lines = content.split('\n');
+      const html = lines.map((line, i) => {
+        const lineNum = startLine + i;
+        return `<span class="code-line"><span class="line-number">${lineNum}</span>${escapeHtml(line)}</span>`;
+      }).join('\n');
+
+      document.getElementById('code-content').innerHTML = html;
+    }
+
+    // Initialize on load
+    init();
+  </script>
+</body>
+</html>

@@ -1,28 +1,24 @@
 """AI services for ScopeDocs using Together.ai"""
 
-from .client import TogetherClient, get_client
-from .embeddings import EmbeddingService
-from .generation import DocGenerationService
-from .search import SearchService
-from .audiences import (
-    Audience,
-    AudienceProfile,
-    MultiAudienceDocService,
-    get_audience_profile,
-    list_audiences,
-    AUDIENCE_PROFILES,
+from .client import (
+    TogetherClient,
+    get_client,
+    truncate_for_embedding,
+    EMBEDDING_MAX_TOKENS,
+    EMBEDDING_MODEL,
+    EMBEDDING_DIMS,
 )
+from .embeddings import EmbeddingService
+from .search import RAGSearchService, ask_codebase
 
 __all__ = [
     "TogetherClient",
     "get_client",
+    "truncate_for_embedding",
+    "EMBEDDING_MAX_TOKENS",
+    "EMBEDDING_MODEL",
+    "EMBEDDING_DIMS",
     "EmbeddingService",
-    "DocGenerationService",
-    "SearchService",
-    "Audience",
-    "AudienceProfile",
-    "MultiAudienceDocService",
-    "get_audience_profile",
-    "list_audiences",
-    "AUDIENCE_PROFILES",
+    "RAGSearchService",
+    "ask_codebase",
 ]
