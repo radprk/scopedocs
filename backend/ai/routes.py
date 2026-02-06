@@ -319,11 +319,21 @@ Title the document appropriately for doc_type="{request.doc_type}".
 
     print(f"  Calling LLM with {len(context.results)} code references...")
 
-    result = await client.generate(
-        prompt=prompt,
-        max_tokens=1500,
-    )
-    doc_content = result.text
+    try:
+        result = await client.generate(
+            prompt=prompt,
+            max_tokens=1500,
+        )
+        doc_content = result.text
+    except Exception as e:
+        error_msg = str(e)
+        print(f"  LLM error: {error_msg}")
+        return GenerateDocResponse(
+            title="Generation Error",
+            content=f"Failed to generate documentation: {error_msg}",
+            references=references,
+            token_estimate=0,
+        )
 
     # Extract title from first line if it's a heading
     lines = doc_content.strip().split("\n")

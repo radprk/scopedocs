@@ -1035,6 +1035,15 @@ async def api_generate_embeddings(data: dict):
             if not texts_to_embed:
                 continue
 
+            # BGE has 512 token limit. Code ≈ 0.5 tokens/char, so 1000 chars max
+            def truncate_text(text: str, max_chars: int = 1000) -> str:
+                if len(text) > max_chars:
+                    return text[:max_chars] + "..."
+                return text
+            
+            truncated_texts = [truncate_text(t) for t in texts_to_embed]
+            logger.info(f"Embedding {len(truncated_texts)} texts, max len: {max(len(t) for t in truncated_texts)} chars")
+            
             # Generate embeddings via Together.ai
             try:
                 embed_response = await http.post(
@@ -1045,7 +1054,7 @@ async def api_generate_embeddings(data: dict):
                     },
                     json={
                         "model": "BAAI/bge-large-en-v1.5",
-                        "input": texts_to_embed,
+                        "input": truncated_texts,
                     }
                 )
 
@@ -1063,7 +1072,7 @@ async def api_generate_embeddings(data: dict):
                         existing = await conn.fetchrow(
                             """
                             SELECT id, content_hash FROM code_embeddings
-                            WHERE workspace_id = $1 AND repo_full_name = $2
+                            WHERE workspace_id = $1::uuid AND repo_full_name = $2
                             AND file_path = $3 AND chunk_index = $4
                             """,
                             workspace_id, repo_full_name, meta["file_path"], meta["chunk_index"]
@@ -1073,13 +1082,16 @@ async def api_generate_embeddings(data: dict):
                             stats["skipped"] += 1
                             continue
 
+                        # Format embedding as pgvector string
+                        embedding_str = '[' + ','.join(str(x) for x in embedding) + ']'
+                        
                         # Upsert embedding
                         await conn.execute(
                             """
                             INSERT INTO code_embeddings
                             (workspace_id, repo_full_name, file_path, commit_sha, chunk_index,
                              start_line, end_line, content_hash, embedding, language)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::vector, $10)
+                            VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::vector, $10)
                             ON CONFLICT (workspace_id, repo_full_name, file_path, chunk_index)
                             DO UPDATE SET
                                 content_hash = EXCLUDED.content_hash,
@@ -1088,7 +1100,7 @@ async def api_generate_embeddings(data: dict):
                             """,
                             workspace_id, repo_full_name, meta["file_path"], "main",
                             meta["chunk_index"], meta["start_line"], meta["end_line"],
-                            meta["content_hash"], json.dumps(embedding), "python"
+                            meta["content_hash"], embedding_str, "python"
                         )
                         stats["new_embeddings"] += 1
 
@@ -1100,7 +1112,7 @@ async def api_generate_embeddings(data: dict):
     # Get total embeddings count
     async with pool.acquire() as conn:
         total = await conn.fetchval(
-            "SELECT COUNT(*) FROM code_embeddings WHERE workspace_id = $1 AND repo_full_name = $2",
+            "SELECT COUNT(*) FROM code_embeddings WHERE workspace_id = $1::uuid AND repo_full_name = $2",
             workspace_id, repo_full_name
         )
 

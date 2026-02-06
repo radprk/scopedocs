@@ -137,7 +137,7 @@ class EmbeddingService:
                 """
                 SELECT id, content_hash, commit_sha
                 FROM code_embeddings
-                WHERE workspace_id = $1
+                WHERE workspace_id = $1::uuid
                   AND repo_full_name = $2
                   AND file_path = $3
                   AND chunk_index = $4
@@ -171,6 +171,9 @@ class EmbeddingService:
         embedding: List[float],
     ):
         """Insert or update a code embedding."""
+        # Format embedding as pgvector string: '[1.0, 2.0, ...]'
+        embedding_str = '[' + ','.join(str(x) for x in embedding) + ']'
+        
         async with self.pool.acquire() as conn:
             await conn.execute(
                 """
@@ -178,7 +181,7 @@ class EmbeddingService:
                     workspace_id, repo_full_name, file_path, commit_sha,
                     chunk_index, start_line, end_line, content_hash,
                     embedding, symbol_names, language, metadata
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                ) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::vector, $10, $11, $12)
                 ON CONFLICT (workspace_id, repo_full_name, file_path, chunk_index)
                 DO UPDATE SET
                     commit_sha = EXCLUDED.commit_sha,
@@ -196,7 +199,7 @@ class EmbeddingService:
                 chunk.start_line,
                 chunk.end_line,
                 chunk._content_hash,
-                json.dumps(embedding),  # pgvector accepts JSON array
+                embedding_str,  # pgvector expects '[1.0, 2.0, ...]' string
                 chunk.symbol_names or [],
                 chunk.language,
                 json.dumps({}),
@@ -213,7 +216,7 @@ class EmbeddingService:
             await conn.execute(
                 """
                 DELETE FROM code_embeddings
-                WHERE workspace_id = $1
+                WHERE workspace_id = $1::uuid
                   AND repo_full_name = $2
                   AND file_path = $3
                 """,
@@ -326,7 +329,7 @@ class EmbeddingService:
                         COUNT(DISTINCT file_path) as total_files,
                         MAX(updated_at) as last_updated
                     FROM code_embeddings
-                    WHERE workspace_id = $1 AND repo_full_name = $2
+                    WHERE workspace_id = $1::uuid AND repo_full_name = $2
                     """,
                     workspace_id,
                     repo_full_name,
@@ -340,34 +343,13 @@ class EmbeddingService:
                         COUNT(DISTINCT repo_full_name) as total_repos,
                         MAX(updated_at) as last_updated
                     FROM code_embeddings
-                    WHERE workspace_id = $1
+                    WHERE workspace_id = $1::uuid
                     """,
                     workspace_id,
                 )
 
-            doc_stats = await conn.fetchrow(
-                """
-                SELECT COUNT(*) as total_docs
-                FROM generated_docs
-                WHERE workspace_id = $1
-                """,
-                workspace_id,
-            )
-
-            message_stats = await conn.fetchrow(
-                """
-                SELECT
-                    COUNT(*) as total_messages,
-                    COUNT(*) FILTER (WHERE source = 'slack') as slack_messages,
-                    COUNT(*) FILTER (WHERE source = 'linear') as linear_messages
-                FROM message_embeddings
-                WHERE workspace_id = $1
-                """,
-                workspace_id,
-            )
-
             return {
                 "code": dict(code_stats) if code_stats else {},
-                "docs": dict(doc_stats) if doc_stats else {},
-                "messages": dict(message_stats) if message_stats else {},
+                "total_chunks": code_stats["total_chunks"] if code_stats else 0,
+                "total_files": code_stats["total_files"] if code_stats else 0,
             }

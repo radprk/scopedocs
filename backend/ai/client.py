@@ -1,21 +1,43 @@
 """Together.ai client wrapper for embeddings and generation."""
 
 import os
+import logging
 import asyncio
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 import httpx
 
+logger = logging.getLogger(__name__)
+
 # Configuration
 TOGETHER_API_BASE = "https://api.together.xyz/v1"
 
 # Model configurations
-EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"  # 1024 dimensions
+# BGE-large is reliable but has 512 token limit
+# We'll use aggressive truncation to fit
+EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
 EMBEDDING_DIMS = 1024
+EMBEDDING_MAX_TOKENS = 512
 
-# Generation models
-CODE_MODEL = "Qwen/Qwen2.5-Coder-32B-Instruct"  # Best for code tasks
-GENERAL_MODEL = "meta-llama/Llama-3.3-70B-Instruct-Turbo"  # General summarization
+
+def truncate_for_embedding(text: str, max_chars: int = 1000) -> str:
+    """
+    Truncate text to fit within BGE's 512 token limit.
+    
+    Code averages ~0.5 tokens per char, so 1000 chars ≈ 500 tokens.
+    This leaves some buffer for safety.
+    """
+    if not text:
+        return text
+    
+    if len(text) <= max_chars:
+        return text
+    
+    return text[:max_chars] + "..."
+
+# Generation models (serverless - no dedicated endpoint needed)
+CODE_MODEL = "meta-llama/Llama-3.3-70B-Instruct-Turbo"  # Great for code, available serverless
+GENERAL_MODEL = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
 
 
 @dataclass
@@ -81,13 +103,16 @@ class TogetherClient:
         """
         client = await self._get_client()
 
+        # Truncate texts to fit within model's token limit
+        truncated_texts = [truncate_for_embedding(t) for t in texts]
+
         # Together.ai has a limit of ~100 texts per request
         # Batch if needed
         batch_size = 50
         all_embeddings = []
 
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
+        for i in range(0, len(truncated_texts), batch_size):
+            batch = truncated_texts[i : i + batch_size]
 
             response = await client.post(
                 "/embeddings",
@@ -148,17 +173,20 @@ class TogetherClient:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        response = await client.post(
-            "/chat/completions",
-            json={
-                "model": model,
-                "messages": messages,
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-                "stop": stop,
-            },
-        )
-        response.raise_for_status()
+        payload = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        if stop:
+            payload["stop"] = stop
+            
+        response = await client.post("/chat/completions", json=payload)
+        if response.status_code != 200:
+            error_text = response.text
+            logger.error(f"Together.ai error ({response.status_code}): {error_text}")
+            raise Exception(f"Together.ai error: {error_text}")
         data = response.json()
 
         choice = data["choices"][0]
