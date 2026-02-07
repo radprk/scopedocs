@@ -108,6 +108,12 @@ async def serve_docs_ui():
     return FileResponse(FRONTEND_DIR / "docs.html")
 
 
+@app.get("/dashboard")
+async def serve_dashboard():
+    """Serve the unified debug dashboard."""
+    return FileResponse(FRONTEND_DIR / "dashboard.html")
+
+
 # Serve output files (sample docs and references)
 OUTPUT_DIR = PROJECT_ROOT / "output"
 
@@ -1280,6 +1286,51 @@ async def api_list_indexed_files(workspace_id: str):
             for f in files
         ]
     }
+
+
+# =============================================================================
+# Debug endpoints for database inspection
+# =============================================================================
+
+@app.get("/api/debug/table/{table_name}")
+async def api_debug_table(table_name: str, workspace_id: str = None, limit: int = 50):
+    """
+    Debug endpoint to view contents of database tables.
+    Only allows specific safe tables to be queried.
+    """
+    from fastapi import HTTPException
+    from backend.storage.postgres import get_pool
+
+    # Whitelist of allowed tables
+    allowed_tables = {
+        'workspaces': 'SELECT id, name, slug, created_at FROM workspaces ORDER BY created_at DESC LIMIT $1',
+        'oauth_tokens': 'SELECT id, workspace_id, provider, created_at, expires_at FROM oauth_tokens ORDER BY created_at DESC LIMIT $1',
+        'code_embeddings': 'SELECT id, workspace_id, repo_full_name, file_path, chunk_index, start_line, end_line, language, created_at FROM code_embeddings ORDER BY created_at DESC LIMIT $1',
+        'file_path_lookup': 'SELECT id, repo_id, file_path, file_content_hash, created_at, updated_at FROM file_path_lookup ORDER BY updated_at DESC LIMIT $1',
+        'code_chunks': 'SELECT id, repo_id, file_path_hash, chunk_index, start_line, end_line, created_at FROM code_chunks ORDER BY created_at DESC LIMIT $1',
+        'generated_docs': 'SELECT id, workspace_id, repo_full_name, file_path, doc_type, title, is_stale, version, created_at FROM generated_docs ORDER BY created_at DESC LIMIT $1',
+    }
+
+    if table_name not in allowed_tables:
+        raise HTTPException(status_code=400, detail=f"Table '{table_name}' not allowed. Allowed: {list(allowed_tables.keys())}")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        try:
+            rows = await conn.fetch(allowed_tables[table_name], limit)
+            result = []
+            for row in rows:
+                row_dict = dict(row)
+                # Convert UUIDs and datetimes to strings
+                for k, v in row_dict.items():
+                    if hasattr(v, 'isoformat'):
+                        row_dict[k] = v.isoformat()
+                    elif hasattr(v, 'hex'):
+                        row_dict[k] = str(v)
+                result.append(row_dict)
+            return {"table": table_name, "rows": result, "count": len(result)}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.on_event("startup")

@@ -1,0 +1,1279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ScopeDocs – Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    :root {
+      --bg-base: #0a0a0f;
+      --bg-card: #12121a;
+      --bg-card-hover: #181824;
+      --border: #2a2a3a;
+      --text: #e4e4ef;
+      --text-muted: #7a7a8c;
+      --accent-purple: #8b5cf6;
+      --accent-blue: #3b82f6;
+      --accent-cyan: #06b6d4;
+      --accent-green: #22c55e;
+      --accent-orange: #f59e0b;
+      --accent-red: #ef4444;
+      --success: #22c55e;
+      --error: #ef4444;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Outfit', system-ui, sans-serif;
+      background: var(--bg-base);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.6;
+    }
+
+    /* Layout */
+    .app {
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* Sidebar Navigation */
+    .sidebar {
+      width: 220px;
+      background: var(--bg-card);
+      border-right: 1px solid var(--border);
+      padding: 1.5rem 1rem;
+      position: fixed;
+      height: 100vh;
+      overflow-y: auto;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      padding: 0 0.5rem;
+    }
+
+    .logo-icon {
+      width: 24px;
+      height: 24px;
+      background: linear-gradient(135deg, var(--accent-purple), var(--accent-cyan));
+      border-radius: 6px;
+    }
+
+    .subtitle {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      padding: 0 0.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .nav-section {
+      margin-bottom: 1.5rem;
+    }
+
+    .nav-section-title {
+      font-size: 0.65rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-muted);
+      padding: 0 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.6rem 0.75rem;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.15s;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+
+    .nav-item:hover {
+      background: var(--bg-card-hover);
+      color: var(--text);
+    }
+
+    .nav-item.active {
+      background: rgba(139, 92, 246, 0.15);
+      color: var(--accent-purple);
+    }
+
+    .nav-icon {
+      font-size: 1.1rem;
+      width: 20px;
+      text-align: center;
+    }
+
+    .nav-badge {
+      margin-left: auto;
+      font-size: 0.7rem;
+      padding: 0.15rem 0.4rem;
+      background: var(--bg-base);
+      border-radius: 4px;
+      color: var(--text-muted);
+    }
+
+    .nav-badge.success { background: rgba(34, 197, 94, 0.2); color: var(--success); }
+    .nav-badge.warning { background: rgba(245, 158, 11, 0.2); color: var(--accent-orange); }
+
+    /* Main Content */
+    .main {
+      flex: 1;
+      margin-left: 220px;
+      padding: 2rem;
+      min-height: 100vh;
+    }
+
+    .page {
+      display: none;
+      animation: fadeIn 0.2s ease;
+    }
+
+    .page.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .page-header {
+      margin-bottom: 2rem;
+    }
+
+    .page-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 0.25rem;
+    }
+
+    .page-desc {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+
+    /* Cards */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .card-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin-bottom: 1rem;
+    }
+
+    /* Form Elements */
+    select, input[type="text"], textarea {
+      width: 100%;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.875rem;
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.2s;
+      margin-bottom: 1rem;
+    }
+
+    select:focus, input:focus, textarea:focus {
+      border-color: var(--accent-purple);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.25rem;
+      border: none;
+      border-radius: 8px;
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: var(--accent-purple);
+      color: white;
+    }
+
+    .btn-primary:hover { background: #7c3aed; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-secondary {
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .btn-secondary:hover { background: var(--bg-card-hover); }
+
+    .btn-sm {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.8rem;
+    }
+
+    /* Grid */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1rem;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+    }
+
+    /* Stats */
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--accent-purple);
+    }
+
+    .stat-label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    /* Tables */
+    .table-container {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    th, td {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      background: var(--bg-base);
+      font-weight: 600;
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--bg-card-hover); }
+
+    .mono {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+    }
+
+    .truncate {
+      max-width: 200px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Status badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+
+    .badge-success { background: rgba(34, 197, 94, 0.2); color: var(--success); }
+    .badge-warning { background: rgba(245, 158, 11, 0.2); color: var(--accent-orange); }
+    .badge-error { background: rgba(239, 68, 68, 0.2); color: var(--error); }
+    .badge-info { background: rgba(59, 130, 246, 0.2); color: var(--accent-blue); }
+
+    /* Integration cards */
+    .integration-row {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 1rem;
+      background: var(--bg-base);
+      border-radius: 8px;
+      margin-bottom: 0.75rem;
+    }
+
+    .integration-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.25rem;
+    }
+
+    .integration-icon.github { background: rgba(34, 197, 94, 0.15); }
+    .integration-icon.slack { background: rgba(224, 30, 90, 0.15); }
+    .integration-icon.linear { background: rgba(94, 106, 210, 0.15); }
+
+    .integration-info { flex: 1; }
+    .integration-name { font-weight: 600; font-size: 0.95rem; }
+    .integration-status { font-size: 0.8rem; color: var(--text-muted); }
+
+    /* Flow diagram */
+    .flow-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+      padding: 2rem;
+      flex-wrap: wrap;
+    }
+
+    .flow-step {
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      text-align: center;
+      min-width: 140px;
+      transition: all 0.2s;
+    }
+
+    .flow-step:hover {
+      border-color: var(--accent-purple);
+      transform: translateY(-2px);
+    }
+
+    .flow-step.active {
+      border-color: var(--accent-green);
+      background: rgba(34, 197, 94, 0.05);
+    }
+
+    .flow-icon {
+      font-size: 2rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .flow-title {
+      font-weight: 600;
+      font-size: 0.9rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .flow-desc {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .flow-arrow {
+      font-size: 1.5rem;
+      color: var(--text-muted);
+    }
+
+    /* Doc generator styles */
+    .audience-cards {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+
+    .audience-card {
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .audience-card:hover {
+      background: var(--bg-card-hover);
+    }
+
+    .audience-card.active {
+      border-color: var(--accent-purple);
+      background: rgba(139, 92, 246, 0.1);
+    }
+
+    .audience-card-icon {
+      font-size: 1.25rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .audience-card-title {
+      font-weight: 600;
+      font-size: 0.9rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .audience-card-desc {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .style-pills {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .style-pill {
+      padding: 0.5rem 1rem;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .style-pill:hover { background: var(--bg-card-hover); }
+    .style-pill.active {
+      background: var(--accent-purple);
+      border-color: var(--accent-purple);
+      color: white;
+    }
+
+    /* Doc output */
+    .doc-output {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2rem;
+      margin-top: 1rem;
+      max-height: 600px;
+      overflow-y: auto;
+    }
+
+    .doc-output h1 { font-size: 1.5rem; margin-bottom: 1rem; }
+    .doc-output h2 { font-size: 1.2rem; margin-top: 1.5rem; margin-bottom: 0.75rem; color: var(--accent-purple); }
+    .doc-output h3 { font-size: 1rem; margin-top: 1rem; margin-bottom: 0.5rem; }
+    .doc-output p { margin-bottom: 1rem; }
+    .doc-output ul, .doc-output ol { margin-bottom: 1rem; padding-left: 1.5rem; }
+    .doc-output li { margin-bottom: 0.5rem; }
+    .doc-output code {
+      background: var(--bg-base);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85em;
+    }
+    .doc-output pre {
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      overflow-x: auto;
+      margin-bottom: 1rem;
+    }
+    .doc-output pre code { background: none; padding: 0; }
+
+    /* Loading */
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem;
+      color: var(--text-muted);
+    }
+
+    .spinner {
+      width: 24px;
+      height: 24px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent-purple);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-right: 0.75rem;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 2rem;
+      right: 2rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.5rem;
+      font-size: 0.875rem;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+      transform: translateX(150%);
+      transition: transform 0.3s;
+      z-index: 100;
+    }
+
+    .toast.show { transform: translateX(0); }
+    .toast.error { border-color: var(--error); }
+    .toast.success { border-color: var(--success); }
+
+    .hidden { display: none !important; }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .sidebar { width: 60px; padding: 1rem 0.5rem; }
+      .sidebar .logo span, .sidebar .subtitle, .sidebar .nav-section-title, .sidebar .nav-item span:not(.nav-icon) { display: none; }
+      .main { margin-left: 60px; }
+      .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      .audience-cards { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="logo">
+        <div class="logo-icon"></div>
+        <span>ScopeDocs</span>
+      </div>
+      <p class="subtitle">Debug Dashboard</p>
+
+      <nav>
+        <div class="nav-section">
+          <div class="nav-section-title">Overview</div>
+          <div class="nav-item active" data-page="flow">
+            <span class="nav-icon">🔄</span>
+            <span>Data Flow</span>
+          </div>
+        </div>
+
+        <div class="nav-section">
+          <div class="nav-section-title">Setup</div>
+          <div class="nav-item" data-page="workspace">
+            <span class="nav-icon">📁</span>
+            <span>Workspace</span>
+          </div>
+          <div class="nav-item" data-page="integrations">
+            <span class="nav-icon">🔌</span>
+            <span>Integrations</span>
+            <span class="nav-badge" id="nav-integrations-badge">0/3</span>
+          </div>
+          <div class="nav-item" data-page="indexing">
+            <span class="nav-icon">📊</span>
+            <span>Indexing</span>
+          </div>
+        </div>
+
+        <div class="nav-section">
+          <div class="nav-section-title">Generate</div>
+          <div class="nav-item" data-page="docgen">
+            <span class="nav-icon">📄</span>
+            <span>Documentation</span>
+          </div>
+        </div>
+
+        <div class="nav-section">
+          <div class="nav-section-title">Debug</div>
+          <div class="nav-item" data-page="database">
+            <span class="nav-icon">🗄️</span>
+            <span>Database</span>
+          </div>
+          <div class="nav-item" data-page="api">
+            <span class="nav-icon">🔧</span>
+            <span>API Test</span>
+          </div>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main">
+      <!-- Page: Flow Overview -->
+      <div class="page active" id="page-flow">
+        <div class="page-header">
+          <h1 class="page-title">Data Flow Overview</h1>
+          <p class="page-desc">Understand how ScopeDocs processes your code into documentation</p>
+        </div>
+
+        <div class="card">
+          <div class="card-title">The Pipeline</div>
+          <div class="flow-container">
+            <div class="flow-step" id="flow-github">
+              <div class="flow-icon">🐙</div>
+              <div class="flow-title">GitHub</div>
+              <div class="flow-desc">Source code</div>
+            </div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step" id="flow-index">
+              <div class="flow-icon">📑</div>
+              <div class="flow-title">Index</div>
+              <div class="flow-desc">Chunk code</div>
+            </div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step" id="flow-embed">
+              <div class="flow-icon">🧮</div>
+              <div class="flow-title">Embed</div>
+              <div class="flow-desc">Vectorize</div>
+            </div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step" id="flow-search">
+              <div class="flow-icon">🔍</div>
+              <div class="flow-title">Search</div>
+              <div class="flow-desc">Find relevant</div>
+            </div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step" id="flow-generate">
+              <div class="flow-icon">✨</div>
+              <div class="flow-title">Generate</div>
+              <div class="flow-desc">LLM docs</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-3">
+          <div class="stat-card">
+            <div class="stat-value" id="stat-workspaces">-</div>
+            <div class="stat-label">Workspaces</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="stat-files">-</div>
+            <div class="stat-label">Files Indexed</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="stat-embeddings">-</div>
+            <div class="stat-label">Embeddings</div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top: 1rem;">
+          <div class="card-title">Quick Actions</div>
+          <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+            <button class="btn btn-secondary" onclick="navigateTo('workspace')">1. Setup Workspace</button>
+            <button class="btn btn-secondary" onclick="navigateTo('integrations')">2. Connect GitHub</button>
+            <button class="btn btn-secondary" onclick="navigateTo('indexing')">3. Index Repo</button>
+            <button class="btn btn-primary" onclick="navigateTo('docgen')">4. Generate Docs</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Page: Workspace -->
+      <div class="page" id="page-workspace">
+        <div class="page-header">
+          <h1 class="page-title">Workspace Setup</h1>
+          <p class="page-desc">Create or select a workspace to organize your documentation</p>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Select Workspace</div>
+          <select id="workspace-select">
+            <option value="">Loading...</option>
+          </select>
+          <div id="workspace-info" class="hidden" style="padding: 1rem; background: var(--bg-base); border-radius: 8px;">
+            <div style="font-weight: 600;" id="workspace-name">-</div>
+            <div class="mono" style="color: var(--text-muted);" id="workspace-id">-</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Create New Workspace</div>
+          <input type="text" id="new-workspace-name" placeholder="Workspace name (e.g., My Project)">
+          <input type="text" id="new-workspace-slug" placeholder="Slug (optional, e.g., my-project)">
+          <button class="btn btn-primary" onclick="createWorkspace()">Create Workspace</button>
+        </div>
+      </div>
+
+      <!-- Page: Integrations -->
+      <div class="page" id="page-integrations">
+        <div class="page-header">
+          <h1 class="page-title">Integrations</h1>
+          <p class="page-desc">Connect your tools to enable documentation generation</p>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Connected Services</div>
+
+          <div class="integration-row">
+            <div class="integration-icon github">🐙</div>
+            <div class="integration-info">
+              <div class="integration-name">GitHub</div>
+              <div class="integration-status" id="github-status">Not connected</div>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="github-btn" onclick="connectIntegration('github')">Connect</button>
+          </div>
+
+          <div class="integration-row">
+            <div class="integration-icon slack">💬</div>
+            <div class="integration-info">
+              <div class="integration-name">Slack</div>
+              <div class="integration-status" id="slack-status">Not connected</div>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="slack-btn" onclick="connectIntegration('slack')">Connect</button>
+          </div>
+
+          <div class="integration-row">
+            <div class="integration-icon linear">📐</div>
+            <div class="integration-info">
+              <div class="integration-name">Linear</div>
+              <div class="integration-status" id="linear-status">Not connected</div>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="linear-btn" onclick="connectIntegration('linear')">Connect</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Page: Indexing -->
+      <div class="page" id="page-indexing">
+        <div class="page-header">
+          <h1 class="page-title">Code Indexing</h1>
+          <p class="page-desc">Index repositories to enable semantic search</p>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Index Repository</div>
+          <select id="repo-select">
+            <option value="">Connect GitHub first...</option>
+          </select>
+          <div style="display: flex; gap: 0.75rem;">
+            <button class="btn btn-primary" onclick="indexRepo()">Index Repository</button>
+            <button class="btn btn-secondary" onclick="generateEmbeddings()">Generate Embeddings</button>
+          </div>
+        </div>
+
+        <div class="grid-2" style="margin-top: 1rem;">
+          <div class="stat-card">
+            <div class="stat-value" id="idx-files">0</div>
+            <div class="stat-label">Files Indexed</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="idx-chunks">0</div>
+            <div class="stat-label">Code Chunks</div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top: 1rem;" id="indexing-log-card">
+          <div class="card-title">Indexing Log</div>
+          <div id="indexing-log" style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; max-height: 200px; overflow-y: auto; padding: 1rem; background: var(--bg-base); border-radius: 8px;">
+            Ready to index...
+          </div>
+        </div>
+      </div>
+
+      <!-- Page: Doc Generator -->
+      <div class="page" id="page-docgen">
+        <div class="page-header">
+          <h1 class="page-title">Generate Documentation</h1>
+          <p class="page-desc">Create adaptive documentation for your codebase</p>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">Audience</div>
+            <div class="audience-cards">
+              <div class="audience-card active" data-audience="traditional">
+                <div class="audience-card-icon">📖</div>
+                <div class="audience-card-title">Traditional Wiki</div>
+                <div class="audience-card-desc">Classic reference docs</div>
+              </div>
+              <div class="audience-card" data-audience="new_engineer">
+                <div class="audience-card-icon">🎓</div>
+                <div class="audience-card-title">New Engineer</div>
+                <div class="audience-card-desc">Bird's eye view</div>
+              </div>
+              <div class="audience-card" data-audience="oncall">
+                <div class="audience-card-icon">🚨</div>
+                <div class="audience-card-title">On-Call</div>
+                <div class="audience-card-desc">Quick & actionable</div>
+              </div>
+              <div class="audience-card" data-audience="custom">
+                <div class="audience-card-icon">✨</div>
+                <div class="audience-card-title">Custom</div>
+                <div class="audience-card-desc">Describe your purpose</div>
+              </div>
+            </div>
+
+            <div id="custom-context-container" class="hidden">
+              <textarea id="custom-context" placeholder="Describe who you are and what you're trying to understand..."></textarea>
+            </div>
+
+            <div class="card-title" style="margin-top: 1rem;">Style</div>
+            <div class="style-pills">
+              <span class="style-pill active" data-style="narrative">📝 Narrative</span>
+              <span class="style-pill" data-style="concise">⚡ Concise</span>
+              <span class="style-pill" data-style="reference">📚 Reference</span>
+              <span class="style-pill" data-style="tutorial">🎯 Tutorial</span>
+            </div>
+
+            <button class="btn btn-primary" style="width: 100%;" onclick="generateDoc()">Generate Documentation</button>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Output</div>
+            <div id="doc-output" class="doc-output">
+              <p style="color: var(--text-muted); text-align: center;">Select audience and click Generate</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Page: Database -->
+      <div class="page" id="page-database">
+        <div class="page-header">
+          <h1 class="page-title">Database Inspector</h1>
+          <p class="page-desc">View data in Supabase tables</p>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Select Table</div>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;">
+            <button class="btn btn-secondary btn-sm" onclick="loadTable('workspaces')">workspaces</button>
+            <button class="btn btn-secondary btn-sm" onclick="loadTable('oauth_tokens')">oauth_tokens</button>
+            <button class="btn btn-secondary btn-sm" onclick="loadTable('code_embeddings')">code_embeddings</button>
+            <button class="btn btn-secondary btn-sm" onclick="loadTable('file_path_lookup')">file_path_lookup</button>
+            <button class="btn btn-secondary btn-sm" onclick="loadTable('code_chunks')">code_chunks</button>
+            <button class="btn btn-secondary btn-sm" onclick="loadTable('generated_docs')">generated_docs</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Table: <span id="current-table">-</span> (<span id="table-count">0</span> rows)</div>
+          <div class="table-container">
+            <table id="db-table">
+              <thead>
+                <tr><th>Select a table above</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>-</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Page: API Test -->
+      <div class="page" id="page-api">
+        <div class="page-header">
+          <h1 class="page-title">API Tester</h1>
+          <p class="page-desc">Test API endpoints directly</p>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Quick Tests</div>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;">
+            <button class="btn btn-secondary btn-sm" onclick="testAPI('GET', '/health')">Health Check</button>
+            <button class="btn btn-secondary btn-sm" onclick="testAPI('GET', '/api/workspaces')">List Workspaces</button>
+            <button class="btn btn-secondary btn-sm" onclick="testAPI('GET', '/api/ai/health')">AI Health</button>
+            <button class="btn btn-secondary btn-sm" onclick="testAPI('GET', '/api/ai/doc-styles')">Doc Styles</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Response</div>
+          <pre id="api-response" style="background: var(--bg-base); padding: 1rem; border-radius: 8px; max-height: 400px; overflow: auto; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem;">
+Click a test button above...
+          </pre>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const API = window.location.origin;
+    let state = {
+      workspaceId: null,
+      workspaces: [],
+      repos: [],
+      audience: 'traditional',
+      style: 'narrative',
+      integrations: { github: false, slack: false, linear: false }
+    };
+
+    // ========== Navigation ==========
+    document.querySelectorAll('.nav-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const page = item.dataset.page;
+        navigateTo(page);
+      });
+    });
+
+    function navigateTo(page) {
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      document.querySelector(`.nav-item[data-page="${page}"]`)?.classList.add('active');
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.getElementById(`page-${page}`)?.classList.add('active');
+    }
+
+    // ========== Toast ==========
+    function toast(msg, type = 'info') {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = 'toast show ' + type;
+      setTimeout(() => t.className = 'toast', 3000);
+    }
+
+    // ========== Workspace ==========
+    async function loadWorkspaces() {
+      try {
+        const res = await fetch(`${API}/api/workspaces`);
+        const data = await res.json();
+        state.workspaces = data.workspaces || [];
+
+        const select = document.getElementById('workspace-select');
+        select.innerHTML = state.workspaces.length === 0
+          ? '<option value="">No workspaces - create one</option>'
+          : `<option value="">Select workspace...</option>${state.workspaces.map(w =>
+              `<option value="${w.id}">${w.name}</option>`).join('')}`;
+
+        document.getElementById('stat-workspaces').textContent = state.workspaces.length;
+
+        // Auto-select if only one
+        if (state.workspaces.length === 1) {
+          select.value = state.workspaces[0].id;
+          onWorkspaceChange();
+        }
+      } catch (e) {
+        toast('Error loading workspaces: ' + e.message, 'error');
+      }
+    }
+
+    document.getElementById('workspace-select').addEventListener('change', onWorkspaceChange);
+
+    async function onWorkspaceChange() {
+      const id = document.getElementById('workspace-select').value;
+      state.workspaceId = id;
+
+      if (id) {
+        const ws = state.workspaces.find(w => w.id === id);
+        document.getElementById('workspace-name').textContent = ws?.name || '-';
+        document.getElementById('workspace-id').textContent = id;
+        document.getElementById('workspace-info').classList.remove('hidden');
+
+        await loadIntegrationStatus();
+        await loadRepos();
+        await loadIndexStats();
+      } else {
+        document.getElementById('workspace-info').classList.add('hidden');
+      }
+    }
+
+    async function createWorkspace() {
+      const name = document.getElementById('new-workspace-name').value.trim();
+      const slug = document.getElementById('new-workspace-slug').value.trim();
+
+      if (!name) { toast('Enter a name', 'error'); return; }
+
+      try {
+        const res = await fetch(`${API}/api/workspaces`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, slug })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail);
+
+        toast('Workspace created!', 'success');
+        await loadWorkspaces();
+        document.getElementById('workspace-select').value = data.id;
+        onWorkspaceChange();
+      } catch (e) {
+        toast('Error: ' + e.message, 'error');
+      }
+    }
+
+    // ========== Integrations ==========
+    async function loadIntegrationStatus() {
+      if (!state.workspaceId) return;
+
+      try {
+        const res = await fetch(`${API}/api/oauth/status/${state.workspaceId}`);
+        const data = await res.json();
+
+        state.integrations = { github: data.github, slack: data.slack, linear: data.linear };
+
+        ['github', 'slack', 'linear'].forEach(p => {
+          const connected = data[p];
+          document.getElementById(`${p}-status`).textContent = connected ? '✓ Connected' : 'Not connected';
+          document.getElementById(`${p}-btn`).textContent = connected ? 'Disconnect' : 'Connect';
+        });
+
+        const count = [data.github, data.slack, data.linear].filter(Boolean).length;
+        document.getElementById('nav-integrations-badge').textContent = `${count}/3`;
+        document.getElementById('nav-integrations-badge').className = 'nav-badge ' + (count === 3 ? 'success' : 'warning');
+
+        // Update flow diagram
+        document.getElementById('flow-github').classList.toggle('active', data.github);
+      } catch (e) {
+        console.error('Error loading integration status:', e);
+      }
+    }
+
+    function connectIntegration(provider) {
+      if (!state.workspaceId) { toast('Select workspace first', 'error'); return; }
+
+      if (state.integrations[provider]) {
+        // Disconnect
+        fetch(`${API}/api/oauth/${provider}/disconnect?workspace_id=${state.workspaceId}`, { method: 'DELETE' })
+          .then(() => { toast(`${provider} disconnected`); loadIntegrationStatus(); });
+      } else {
+        // Connect
+        window.location.href = `${API}/api/oauth/${provider}/connect?workspace_id=${state.workspaceId}`;
+      }
+    }
+
+    // ========== Repos & Indexing ==========
+    async function loadRepos() {
+      if (!state.workspaceId || !state.integrations.github) return;
+
+      try {
+        const res = await fetch(`${API}/api/github/repos/${state.workspaceId}`);
+        const data = await res.json();
+        state.repos = data.repos || [];
+
+        const select = document.getElementById('repo-select');
+        select.innerHTML = state.repos.length === 0
+          ? '<option value="">No repos found</option>'
+          : `<option value="">Select repo...</option>${state.repos.map(r =>
+              `<option value="${r.full_name}">${r.full_name}</option>`).join('')}`;
+      } catch (e) {
+        console.error('Error loading repos:', e);
+      }
+    }
+
+    async function loadIndexStats() {
+      if (!state.workspaceId) return;
+
+      try {
+        const res = await fetch(`${API}/api/index/stats/${state.workspaceId}`);
+        const data = await res.json();
+
+        document.getElementById('stat-files').textContent = data.total_files || 0;
+        document.getElementById('idx-files').textContent = data.total_files || 0;
+        document.getElementById('idx-chunks').textContent = data.total_chunks || 0;
+
+        // Update flow
+        document.getElementById('flow-index').classList.toggle('active', data.total_files > 0);
+
+        // Load embedding stats
+        const aiRes = await fetch(`${API}/api/ai/stats/${state.workspaceId}`);
+        if (aiRes.ok) {
+          const aiData = await aiRes.json();
+          document.getElementById('stat-embeddings').textContent = aiData.total_embeddings || 0;
+          document.getElementById('flow-embed').classList.toggle('active', aiData.total_embeddings > 0);
+        }
+      } catch (e) {
+        console.error('Error loading stats:', e);
+      }
+    }
+
+    async function indexRepo() {
+      const repo = document.getElementById('repo-select').value;
+      if (!repo) { toast('Select a repo', 'error'); return; }
+
+      const log = document.getElementById('indexing-log');
+      log.textContent = `Indexing ${repo}...\n`;
+
+      try {
+        const res = await fetch(`${API}/api/index/repo`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workspace_id: state.workspaceId, repo_full_name: repo })
+        });
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.detail);
+
+        log.textContent += `✓ Indexed ${data.stats.files_indexed} files, ${data.stats.chunks_created} chunks\n`;
+        if (data.stats.errors.length) {
+          log.textContent += `⚠ Errors: ${data.stats.errors.slice(0, 3).join(', ')}\n`;
+        }
+
+        toast('Indexing complete!', 'success');
+        loadIndexStats();
+      } catch (e) {
+        log.textContent += `✗ Error: ${e.message}\n`;
+        toast('Indexing failed: ' + e.message, 'error');
+      }
+    }
+
+    async function generateEmbeddings() {
+      const repo = document.getElementById('repo-select').value;
+      if (!repo) { toast('Select a repo', 'error'); return; }
+
+      const log = document.getElementById('indexing-log');
+      log.textContent += `\nGenerating embeddings for ${repo}...\n`;
+
+      try {
+        const res = await fetch(`${API}/api/index/embed`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workspace_id: state.workspaceId, repo_full_name: repo })
+        });
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.detail);
+
+        log.textContent += `✓ Generated ${data.new_embeddings} embeddings (${data.skipped} skipped)\n`;
+        log.textContent += `Total embeddings: ${data.total_embeddings}\n`;
+
+        toast('Embeddings generated!', 'success');
+        loadIndexStats();
+      } catch (e) {
+        log.textContent += `✗ Error: ${e.message}\n`;
+        toast('Embedding failed: ' + e.message, 'error');
+      }
+    }
+
+    // ========== Doc Generation ==========
+    document.querySelectorAll('.audience-card').forEach(card => {
+      card.addEventListener('click', () => {
+        document.querySelectorAll('.audience-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+        state.audience = card.dataset.audience;
+
+        document.getElementById('custom-context-container').classList.toggle('hidden', state.audience !== 'custom');
+      });
+    });
+
+    document.querySelectorAll('.style-pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        document.querySelectorAll('.style-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        state.style = pill.dataset.style;
+      });
+    });
+
+    async function generateDoc() {
+      const repo = document.getElementById('repo-select').value;
+      if (!repo) { toast('Select a repo first', 'error'); return; }
+
+      const output = document.getElementById('doc-output');
+      output.innerHTML = '<div class="loading"><div class="spinner"></div>Generating documentation...</div>';
+
+      try {
+        const body = {
+          workspace_id: state.workspaceId,
+          repo_full_name: repo,
+          audience_type: state.audience,
+          style: state.style
+        };
+
+        if (state.audience === 'custom') {
+          body.custom_context = document.getElementById('custom-context').value;
+          body.purpose = body.custom_context;
+        }
+
+        const res = await fetch(`${API}/api/ai/generate-adaptive-doc`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail);
+
+        output.innerHTML = marked.parse(data.content);
+        toast('Documentation generated!', 'success');
+
+        // Update flow
+        document.getElementById('flow-search').classList.add('active');
+        document.getElementById('flow-generate').classList.add('active');
+      } catch (e) {
+        output.innerHTML = `<p style="color: var(--error);">Error: ${e.message}</p>`;
+        toast('Generation failed: ' + e.message, 'error');
+      }
+    }
+
+    // ========== Database Inspector ==========
+    async function loadTable(tableName) {
+      document.getElementById('current-table').textContent = tableName;
+
+      try {
+        const res = await fetch(`${API}/api/debug/table/${tableName}?workspace_id=${state.workspaceId || ''}`);
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.detail);
+
+        const rows = data.rows || [];
+        document.getElementById('table-count').textContent = rows.length;
+
+        if (rows.length === 0) {
+          document.getElementById('db-table').innerHTML = '<thead><tr><th>No data</th></tr></thead><tbody><tr><td>Table is empty</td></tr></tbody>';
+          return;
+        }
+
+        const columns = Object.keys(rows[0]);
+        const thead = `<tr>${columns.map(c => `<th>${c}</th>`).join('')}</tr>`;
+        const tbody = rows.map(row =>
+          `<tr>${columns.map(c => {
+            let val = row[c];
+            if (val === null) val = '<span style="color:var(--text-muted)">null</span>';
+            else if (typeof val === 'object') val = '<span class="mono truncate">' + JSON.stringify(val).substring(0, 50) + '...</span>';
+            else if (typeof val === 'string' && val.length > 50) val = '<span class="truncate">' + val.substring(0, 50) + '...</span>';
+            return `<td>${val}</td>`;
+          }).join('')}</tr>`
+        ).join('');
+
+        document.getElementById('db-table').innerHTML = `<thead>${thead}</thead><tbody>${tbody}</tbody>`;
+      } catch (e) {
+        document.getElementById('db-table').innerHTML = `<thead><tr><th>Error</th></tr></thead><tbody><tr><td style="color:var(--error)">${e.message}</td></tr></tbody>`;
+      }
+    }
+
+    // ========== API Tester ==========
+    async function testAPI(method, endpoint) {
+      const output = document.getElementById('api-response');
+      output.textContent = `${method} ${endpoint}\n\nLoading...`;
+
+      try {
+        const res = await fetch(`${API}${endpoint}`, { method });
+        const data = await res.json();
+        output.textContent = `${method} ${endpoint}\nStatus: ${res.status}\n\n${JSON.stringify(data, null, 2)}`;
+      } catch (e) {
+        output.textContent = `${method} ${endpoint}\nError: ${e.message}`;
+      }
+    }
+
+    // ========== Init ==========
+    loadWorkspaces();
+  </script>
+</body>
+</html>
