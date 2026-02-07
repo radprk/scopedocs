@@ -13,19 +13,20 @@ logger = logging.getLogger(__name__)
 TOGETHER_API_BASE = "https://api.together.xyz/v1"
 OPENAI_API_BASE = "https://api.openai.com/v1"
 
-# Embedding providers (in order of preference)
-# OpenAI is more reliable, Together.ai is cheaper
-EMBEDDING_PROVIDER = os.environ.get("EMBEDDING_PROVIDER", "auto")  # "openai", "together", or "auto"
+# Embedding providers: "together" (default), "openai", or "auto"
+# Together.ai is primary, OpenAI is fallback
+EMBEDDING_PROVIDER = os.environ.get("EMBEDDING_PROVIDER", "together")
 
 # Model configurations
-TOGETHER_EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
-TOGETHER_EMBEDDING_DIMS = 1024
+# Using bge-base (768 dims) - bge-large (1024) has availability issues
+TOGETHER_EMBEDDING_MODEL = "BAAI/bge-base-en-v1.5"
+TOGETHER_EMBEDDING_DIMS = 768
 
 OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
 OPENAI_EMBEDDING_DIMS = 1536
 
-# Use environment to determine which dimensions we're using
-EMBEDDING_DIMS = OPENAI_EMBEDDING_DIMS if os.environ.get("OPENAI_API_KEY") else TOGETHER_EMBEDDING_DIMS
+# Default to Together.ai dimensions (768)
+EMBEDDING_DIMS = int(os.environ.get("EMBEDDING_DIMS", TOGETHER_EMBEDDING_DIMS))
 EMBEDDING_MAX_TOKENS = 512
 
 
