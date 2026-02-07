@@ -13,6 +13,10 @@ PROJECT_ROOT = ROOT_DIR.parent
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 load_dotenv(ROOT_DIR / '.env')
 
+# Reduce httpx verbosity (was logging every single request)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -23,9 +27,9 @@ from backend.sync.routes import router as sync_router
 from backend.integrations.oauth.routes import router as oauth_router
 from backend.storage.postgres import init_pg, close_pool, list_workspaces, create_workspace, get_workspace
 
-# AI router (optional - only loaded if TOGETHER_API_KEY is set)
+# AI router (optional - loaded if TOGETHER_API_KEY or OPENAI_API_KEY is set)
 ai_router = None
-if os.environ.get("TOGETHER_API_KEY"):
+if os.environ.get("TOGETHER_API_KEY") or os.environ.get("OPENAI_API_KEY"):
     try:
         from backend.ai.routes import router as ai_router
         print(f"[AI] AI routes enabled - TOGETHER_API_KEY is set")
