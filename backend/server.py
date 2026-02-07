@@ -1069,7 +1069,7 @@ async def api_generate_embeddings(data: dict):
                         "Content-Type": "application/json",
                     },
                     json={
-                        "model": "BAAI/bge-large-en-v1.5",
+                        "model": "BAAI/bge-base-en-v1.5",  # 768 dims, more reliable
                         "input": truncated_texts,
                     }
                 )
