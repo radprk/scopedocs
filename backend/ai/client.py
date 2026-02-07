@@ -1,4 +1,4 @@
-"""Together.ai client wrapper for embeddings and generation."""
+"""AI client wrapper for embeddings and generation with multi-provider support."""
 
 import os
 import logging
@@ -11,28 +11,39 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 TOGETHER_API_BASE = "https://api.together.xyz/v1"
+OPENAI_API_BASE = "https://api.openai.com/v1"
+
+# Embedding providers (in order of preference)
+# OpenAI is more reliable, Together.ai is cheaper
+EMBEDDING_PROVIDER = os.environ.get("EMBEDDING_PROVIDER", "auto")  # "openai", "together", or "auto"
 
 # Model configurations
-# BGE-large is reliable but has 512 token limit
-# We'll use aggressive truncation to fit
-EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
-EMBEDDING_DIMS = 1024
+TOGETHER_EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
+TOGETHER_EMBEDDING_DIMS = 1024
+
+OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
+OPENAI_EMBEDDING_DIMS = 1536
+
+# Use environment to determine which dimensions we're using
+EMBEDDING_DIMS = OPENAI_EMBEDDING_DIMS if os.environ.get("OPENAI_API_KEY") else TOGETHER_EMBEDDING_DIMS
 EMBEDDING_MAX_TOKENS = 512
 
 
-def truncate_for_embedding(text: str, max_chars: int = 1000) -> str:
+def truncate_for_embedding(text: str, max_chars: int = 1500) -> str:
     """
-    Truncate text to fit within BGE's 512 token limit.
-    
-    Code averages ~0.5 tokens per char, so 1000 chars ≈ 500 tokens.
-    This leaves some buffer for safety.
+    Truncate text to fit within embedding model token limits.
+
+    OpenAI text-embedding-3-small: 8191 tokens
+    BGE-large: 512 tokens
+
+    Using 1500 chars as safe default (~750 tokens).
     """
     if not text:
         return text
-    
+
     if len(text) <= max_chars:
         return text
-    
+
     return text[:max_chars] + "..."
 
 # Generation models (serverless - no dedicated endpoint needed)
@@ -46,6 +57,7 @@ class EmbeddingResult:
     embeddings: List[List[float]]
     model: str
     usage: Dict[str, int]
+    provider: str = "unknown"
 
 
 @dataclass
@@ -58,56 +70,85 @@ class GenerationResult:
 
 
 class TogetherClient:
-    """Async client for Together.ai API."""
+    """Async client for AI APIs with multi-provider support."""
 
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or os.environ.get("TOGETHER_API_KEY")
-        if not self.api_key:
-            raise ValueError(
-                "TOGETHER_API_KEY environment variable is required. "
-                "Get your key at https://api.together.xyz/settings/api-keys"
-            )
-        self._client: Optional[httpx.AsyncClient] = None
+        self.together_key = api_key or os.environ.get("TOGETHER_API_KEY")
+        self.openai_key = os.environ.get("OPENAI_API_KEY")
 
-    async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(
+        if not self.together_key and not self.openai_key:
+            raise ValueError(
+                "Either TOGETHER_API_KEY or OPENAI_API_KEY environment variable is required."
+            )
+
+        self._together_client: Optional[httpx.AsyncClient] = None
+        self._openai_client: Optional[httpx.AsyncClient] = None
+
+    async def _get_together_client(self) -> httpx.AsyncClient:
+        if self._together_client is None or self._together_client.is_closed:
+            self._together_client = httpx.AsyncClient(
                 base_url=TOGETHER_API_BASE,
                 headers={
-                    "Authorization": f"Bearer {self.api_key}",
+                    "Authorization": f"Bearer {self.together_key}",
                     "Content-Type": "application/json",
                 },
                 timeout=120.0,
             )
-        return self._client
+        return self._together_client
+
+    async def _get_openai_client(self) -> httpx.AsyncClient:
+        if self._openai_client is None or self._openai_client.is_closed:
+            self._openai_client = httpx.AsyncClient(
+                base_url=OPENAI_API_BASE,
+                headers={
+                    "Authorization": f"Bearer {self.openai_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=120.0,
+            )
+        return self._openai_client
 
     async def close(self):
-        if self._client and not self._client.is_closed:
-            await self._client.aclose()
-            self._client = None
+        if self._together_client and not self._together_client.is_closed:
+            await self._together_client.aclose()
+            self._together_client = None
+        if self._openai_client and not self._openai_client.is_closed:
+            await self._openai_client.aclose()
+            self._openai_client = None
 
-    async def embed(
-        self,
-        texts: List[str],
-        model: str = EMBEDDING_MODEL,
-    ) -> EmbeddingResult:
-        """
-        Generate embeddings for a list of texts.
+    async def _embed_openai(self, texts: List[str]) -> EmbeddingResult:
+        """Generate embeddings using OpenAI."""
+        client = await self._get_openai_client()
 
-        Args:
-            texts: List of texts to embed
-            model: Embedding model to use
+        truncated_texts = [truncate_for_embedding(t, max_chars=8000) for t in texts]
 
-        Returns:
-            EmbeddingResult with embeddings and metadata
-        """
-        client = await self._get_client()
+        response = await client.post(
+            "/embeddings",
+            json={
+                "model": OPENAI_EMBEDDING_MODEL,
+                "input": truncated_texts,
+            },
+        )
 
-        # Truncate texts to fit within model's token limit
-        truncated_texts = [truncate_for_embedding(t) for t in texts]
+        if response.status_code != 200:
+            raise Exception(f"OpenAI error: {response.text}")
 
-        # Together.ai has a limit of ~100 texts per request
-        # Batch if needed
+        data = response.json()
+        sorted_data = sorted(data["data"], key=lambda x: x["index"])
+
+        return EmbeddingResult(
+            embeddings=[item["embedding"] for item in sorted_data],
+            model=OPENAI_EMBEDDING_MODEL,
+            usage=data.get("usage", {}),
+            provider="openai",
+        )
+
+    async def _embed_together(self, texts: List[str]) -> EmbeddingResult:
+        """Generate embeddings using Together.ai."""
+        client = await self._get_together_client()
+
+        truncated_texts = [truncate_for_embedding(t, max_chars=1000) for t in texts]
+
         batch_size = 50
         all_embeddings = []
 
@@ -117,27 +158,70 @@ class TogetherClient:
             response = await client.post(
                 "/embeddings",
                 json={
-                    "model": model,
+                    "model": TOGETHER_EMBEDDING_MODEL,
                     "input": batch,
                 },
             )
             response.raise_for_status()
             data = response.json()
 
-            # Sort by index to maintain order
             sorted_data = sorted(data["data"], key=lambda x: x["index"])
             all_embeddings.extend([item["embedding"] for item in sorted_data])
 
         return EmbeddingResult(
             embeddings=all_embeddings,
-            model=model,
-            usage={"total_tokens": sum(len(t.split()) for t in texts)},  # Approximate
+            model=TOGETHER_EMBEDDING_MODEL,
+            usage={"total_tokens": sum(len(t.split()) for t in texts)},
+            provider="together",
         )
+
+    async def embed(
+        self,
+        texts: List[str],
+        model: str = None,  # Ignored, uses provider setting
+    ) -> EmbeddingResult:
+        """
+        Generate embeddings for a list of texts.
+
+        Uses OpenAI if available, falls back to Together.ai.
+        Set EMBEDDING_PROVIDER env var to force a specific provider.
+        """
+        provider = EMBEDDING_PROVIDER
+
+        # Auto-select provider
+        if provider == "auto":
+            if self.openai_key:
+                provider = "openai"
+            elif self.together_key:
+                provider = "together"
+            else:
+                raise ValueError("No API keys available")
+
+        # Try primary provider, fall back if it fails
+        try:
+            if provider == "openai" and self.openai_key:
+                logger.info(f"Using OpenAI for embeddings ({len(texts)} texts)")
+                return await self._embed_openai(texts)
+            elif provider == "together" and self.together_key:
+                logger.info(f"Using Together.ai for embeddings ({len(texts)} texts)")
+                return await self._embed_together(texts)
+        except Exception as e:
+            logger.warning(f"Primary provider {provider} failed: {e}")
+
+            # Try fallback
+            if provider == "openai" and self.together_key:
+                logger.info("Falling back to Together.ai")
+                return await self._embed_together(texts)
+            elif provider == "together" and self.openai_key:
+                logger.info("Falling back to OpenAI")
+                return await self._embed_openai(texts)
+
+            raise  # No fallback available
 
     async def embed_single(
         self,
         text: str,
-        model: str = EMBEDDING_MODEL,
+        model: str = None,
     ) -> List[float]:
         """Embed a single text and return the embedding vector."""
         result = await self.embed([text], model=model)
@@ -153,20 +237,9 @@ class TogetherClient:
         stop: Optional[List[str]] = None,
     ) -> GenerationResult:
         """
-        Generate text completion.
-
-        Args:
-            prompt: The user prompt
-            model: Model to use for generation
-            max_tokens: Maximum tokens to generate
-            temperature: Sampling temperature (0.0-1.0)
-            system_prompt: Optional system prompt
-            stop: Optional stop sequences
-
-        Returns:
-            GenerationResult with generated text and metadata
+        Generate text completion using Together.ai.
         """
-        client = await self._get_client()
+        client = await self._get_together_client()
 
         messages = []
         if system_prompt:
@@ -181,7 +254,7 @@ class TogetherClient:
         }
         if stop:
             payload["stop"] = stop
-            
+
         response = await client.post("/chat/completions", json=payload)
         if response.status_code != 200:
             error_text = response.text
