@@ -102,7 +102,7 @@ async def serve_pipeline_ui():
     return FileResponse(FRONTEND_DIR / "pipeline.html")
 
 
-@app.get("/docs")
+@app.get("/docgen")
 async def serve_docs_ui():
     """Serve the adaptive documentation generator UI."""
     return FileResponse(FRONTEND_DIR / "docs.html")
