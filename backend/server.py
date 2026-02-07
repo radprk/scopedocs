@@ -102,6 +102,12 @@ async def serve_pipeline_ui():
     return FileResponse(FRONTEND_DIR / "pipeline.html")
 
 
+@app.get("/docs")
+async def serve_docs_ui():
+    """Serve the adaptive documentation generator UI."""
+    return FileResponse(FRONTEND_DIR / "docs.html")
+
+
 # Serve output files (sample docs and references)
 OUTPUT_DIR = PROJECT_ROOT / "output"
 

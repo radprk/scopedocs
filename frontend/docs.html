@@ -1,0 +1,1160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ScopeDocs – Adaptive Documentation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    :root {
+      --bg-base: #0a0a0f;
+      --bg-card: #12121a;
+      --bg-card-hover: #181824;
+      --border: #2a2a3a;
+      --text: #e4e4ef;
+      --text-muted: #7a7a8c;
+      --accent-linear: #5e6ad2;
+      --accent-github: #238636;
+      --accent-slack: #e01e5a;
+      --accent-blue: #3b82f6;
+      --accent-purple: #8b5cf6;
+      --accent-orange: #f59e0b;
+      --accent-cyan: #06b6d4;
+      --success: #22c55e;
+      --error: #ef4444;
+      --warning: #f59e0b;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Outfit', system-ui, sans-serif;
+      background: var(--bg-base);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.6;
+    }
+
+    .noise {
+      position: fixed;
+      inset: 0;
+      background: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      opacity: 0.03;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .gradient-bg {
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 20% -10%, rgba(139, 92, 246, 0.15), transparent),
+        radial-gradient(ellipse 60% 40% at 80% 100%, rgba(6, 182, 212, 0.1), transparent);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .app-container {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      min-height: 100vh;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      background: var(--bg-card);
+      border-right: 1px solid var(--border);
+      padding: 1.5rem;
+      overflow-y: auto;
+      height: 100vh;
+      position: sticky;
+      top: 0;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.5rem;
+    }
+
+    .logo-icon {
+      width: 28px;
+      height: 28px;
+      background: linear-gradient(135deg, var(--accent-purple), var(--accent-cyan));
+      border-radius: 6px;
+    }
+
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      margin-bottom: 2rem;
+    }
+
+    .section-title {
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-muted);
+      margin-bottom: 0.75rem;
+      margin-top: 1.5rem;
+    }
+
+    .section-title:first-of-type {
+      margin-top: 0;
+    }
+
+    /* Form Elements */
+    select, input[type="text"], textarea {
+      width: 100%;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.875rem;
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      margin-bottom: 1rem;
+    }
+
+    select:focus, input[type="text"]:focus, textarea:focus {
+      border-color: var(--accent-purple);
+      box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15);
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 80px;
+    }
+
+    select {
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%237a7a8c' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 1rem center;
+      padding-right: 2.5rem;
+    }
+
+    /* Audience Type Cards */
+    .audience-types {
+      display: grid;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+
+    .audience-card {
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .audience-card:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--text-muted);
+    }
+
+    .audience-card.active {
+      border-color: var(--accent-purple);
+      background: rgba(139, 92, 246, 0.1);
+    }
+
+    .audience-card-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .audience-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+    }
+
+    .audience-icon.traditional { background: rgba(59, 130, 246, 0.2); }
+    .audience-icon.new_engineer { background: rgba(34, 197, 94, 0.2); }
+    .audience-icon.oncall { background: rgba(239, 68, 68, 0.2); }
+    .audience-icon.custom { background: rgba(139, 92, 246, 0.2); }
+
+    .audience-name {
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+
+    .audience-desc {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    /* Custom Context Panel */
+    .custom-context-panel {
+      display: none;
+      background: rgba(139, 92, 246, 0.05);
+      border: 1px solid rgba(139, 92, 246, 0.2);
+      border-radius: 10px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .custom-context-panel.show {
+      display: block;
+    }
+
+    .custom-context-panel label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    .custom-context-panel textarea {
+      margin-bottom: 0.5rem;
+    }
+
+    .example-prompts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .example-prompt {
+      font-size: 0.7rem;
+      padding: 0.25rem 0.5rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .example-prompt:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--accent-purple);
+    }
+
+    /* Style Pills */
+    .style-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .style-pill {
+      padding: 0.5rem 1rem;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .style-pill:hover {
+      background: var(--bg-card-hover);
+    }
+
+    .style-pill.active {
+      background: var(--accent-purple);
+      border-color: var(--accent-purple);
+      color: white;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.875rem 1.5rem;
+      border: none;
+      border-radius: 8px;
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      width: 100%;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 20px rgba(139, 92, 246, 0.4);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .btn-secondary {
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .btn-secondary:hover {
+      background: var(--bg-card-hover);
+    }
+
+    /* Main Content */
+    .main-content {
+      padding: 2rem;
+      overflow-y: auto;
+    }
+
+    .doc-header {
+      margin-bottom: 2rem;
+    }
+
+    .doc-title {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.5rem;
+    }
+
+    .doc-meta {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+
+    .doc-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.25rem 0.75rem;
+      background: rgba(139, 92, 246, 0.15);
+      border-radius: 20px;
+      font-size: 0.75rem;
+      color: var(--accent-purple);
+    }
+
+    /* Documentation Content */
+    .doc-content {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2rem;
+      max-width: 800px;
+    }
+
+    .doc-content h1 { font-size: 1.75rem; margin-bottom: 1rem; letter-spacing: -0.02em; }
+    .doc-content h2 { font-size: 1.35rem; margin-top: 2rem; margin-bottom: 0.75rem; color: var(--accent-purple); }
+    .doc-content h3 { font-size: 1.1rem; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+    .doc-content p { margin-bottom: 1rem; line-height: 1.7; }
+    .doc-content ul, .doc-content ol { margin-bottom: 1rem; padding-left: 1.5rem; }
+    .doc-content li { margin-bottom: 0.5rem; line-height: 1.6; }
+    .doc-content code {
+      background: var(--bg-base);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85em;
+    }
+    .doc-content pre {
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      overflow-x: auto;
+      margin-bottom: 1rem;
+    }
+    .doc-content pre code {
+      background: none;
+      padding: 0;
+    }
+    .doc-content blockquote {
+      border-left: 3px solid var(--accent-purple);
+      padding-left: 1rem;
+      margin: 1rem 0;
+      color: var(--text-muted);
+    }
+    .doc-content strong { color: var(--text); font-weight: 600; }
+    .doc-content a { color: var(--accent-blue); text-decoration: none; }
+    .doc-content a:hover { text-decoration: underline; }
+
+    /* Code References */
+    .doc-content a[data-ref] {
+      color: var(--accent-cyan);
+      background: rgba(6, 182, 212, 0.1);
+      padding: 0.1rem 0.4rem;
+      border-radius: 3px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85em;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .doc-content a[data-ref]:hover {
+      background: rgba(6, 182, 212, 0.2);
+    }
+
+    /* Suggestions Panel */
+    .suggestions-panel {
+      margin-top: 2rem;
+      padding: 1.5rem;
+      background: rgba(139, 92, 246, 0.05);
+      border: 1px solid rgba(139, 92, 246, 0.2);
+      border-radius: 12px;
+    }
+
+    .suggestions-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--accent-purple);
+      margin-bottom: 1rem;
+    }
+
+    .suggestion-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .suggestion-chip {
+      padding: 0.5rem 1rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .suggestion-chip:hover {
+      border-color: var(--accent-purple);
+      background: rgba(139, 92, 246, 0.1);
+    }
+
+    /* Loading State */
+    .loading-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 4rem 2rem;
+      color: var(--text-muted);
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent-purple);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 1rem;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Empty State */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 4rem 2rem;
+      text-align: center;
+    }
+
+    .empty-icon {
+      width: 80px;
+      height: 80px;
+      background: var(--bg-card);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 1.5rem;
+      font-size: 2rem;
+    }
+
+    .empty-title {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+
+    .empty-desc {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      max-width: 400px;
+    }
+
+    /* Code Viewer Modal */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.8);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .modal-overlay.show {
+      display: flex;
+    }
+
+    .modal {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      width: 90%;
+      max-width: 800px;
+      max-height: 80vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .modal-title {
+      font-weight: 600;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.9rem;
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 0.5rem;
+      font-size: 1.25rem;
+    }
+
+    .modal-close:hover {
+      color: var(--text);
+    }
+
+    .modal-body {
+      flex: 1;
+      overflow: auto;
+      padding: 0;
+    }
+
+    .code-view {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      line-height: 1.6;
+      white-space: pre;
+      padding: 1rem;
+      background: var(--bg-base);
+      color: var(--text);
+    }
+
+    .code-line-number {
+      display: inline-block;
+      width: 3em;
+      text-align: right;
+      padding-right: 1em;
+      color: var(--text-muted);
+      user-select: none;
+      border-right: 1px solid var(--border);
+      margin-right: 1em;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 2rem;
+      right: 2rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.5rem;
+      font-size: 0.875rem;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+      transform: translateX(150%);
+      opacity: 0;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 100;
+    }
+
+    .toast.show {
+      transform: translateX(0);
+      opacity: 1;
+    }
+
+    .toast.error { border-color: var(--error); }
+    .toast.success { border-color: var(--success); }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .app-container {
+        grid-template-columns: 1fr;
+      }
+      .sidebar {
+        position: relative;
+        height: auto;
+      }
+    }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="noise"></div>
+  <div class="gradient-bg"></div>
+
+  <div class="app-container">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="logo">
+        <div class="logo-icon"></div>
+        ScopeDocs
+      </div>
+      <p class="subtitle">Adaptive Documentation Generator</p>
+
+      <!-- Workspace & Repo Selection -->
+      <div class="section-title">Workspace & Repository</div>
+      <select id="workspace-select">
+        <option value="">Loading workspaces...</option>
+      </select>
+      <select id="repo-select" disabled>
+        <option value="">Select workspace first...</option>
+      </select>
+
+      <!-- Audience Type Selection -->
+      <div class="section-title">How would you like to view docs?</div>
+      <div class="audience-types" id="audience-types">
+        <div class="audience-card active" data-type="traditional">
+          <div class="audience-card-header">
+            <div class="audience-icon traditional">📖</div>
+            <span class="audience-name">Traditional Wiki</span>
+          </div>
+          <p class="audience-desc">Classic reference documentation with full coverage</p>
+        </div>
+
+        <div class="audience-card" data-type="new_engineer">
+          <div class="audience-card-header">
+            <div class="audience-icon new_engineer">🎓</div>
+            <span class="audience-name">I'm New Here</span>
+          </div>
+          <p class="audience-desc">Bird's eye view to understand the big picture first</p>
+        </div>
+
+        <div class="audience-card" data-type="oncall">
+          <div class="audience-card-header">
+            <div class="audience-icon oncall">🚨</div>
+            <span class="audience-name">On-Call Mode</span>
+          </div>
+          <p class="audience-desc">Quick, actionable info for incident response</p>
+        </div>
+
+        <div class="audience-card" data-type="custom">
+          <div class="audience-card-header">
+            <div class="audience-icon custom">✨</div>
+            <span class="audience-name">Tell Me Your Purpose</span>
+          </div>
+          <p class="audience-desc">Describe what you're trying to learn or do</p>
+        </div>
+      </div>
+
+      <!-- Custom Context Panel (shown when "custom" is selected) -->
+      <div class="custom-context-panel" id="custom-context-panel">
+        <label>Describe who you are and what you're trying to understand:</label>
+        <textarea id="custom-context" placeholder="e.g., I'm an AI engineer who recently joined the inference team, trying to understand how the whole system works..."></textarea>
+        <div class="example-prompts">
+          <span class="example-prompt" data-text="I'm a new AI engineer on the inference team, trying to understand the whole system">New AI engineer</span>
+          <span class="example-prompt" data-text="I'm on-call and something in the ETL pipeline broke">On-call debugging ETL</span>
+          <span class="example-prompt" data-text="I want to contribute a new feature to the API">Contributing to API</span>
+        </div>
+      </div>
+
+      <!-- Documentation Style -->
+      <div class="section-title">Documentation Style</div>
+      <div class="style-pills" id="style-pills">
+        <span class="style-pill active" data-style="narrative">📝 Narrative</span>
+        <span class="style-pill" data-style="concise">⚡ Concise</span>
+        <span class="style-pill" data-style="reference">📚 Reference</span>
+        <span class="style-pill" data-style="tutorial">🎯 Tutorial</span>
+      </div>
+
+      <!-- Generate Button -->
+      <button class="btn btn-primary" id="generate-btn" disabled>
+        <span id="generate-btn-text">Generate Documentation</span>
+      </button>
+
+      <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+        <a href="/ui" class="btn btn-secondary" style="text-decoration: none;">
+          ← Back to Integration Dashboard
+        </a>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content" id="main-content">
+      <div class="empty-state" id="empty-state">
+        <div class="empty-icon">📄</div>
+        <h2 class="empty-title">Ready to Generate Docs</h2>
+        <p class="empty-desc">
+          Select a workspace and repository, choose how you'd like to view the documentation,
+          then click "Generate Documentation" to get started.
+        </p>
+      </div>
+
+      <div class="loading-state hidden" id="loading-state">
+        <div class="spinner"></div>
+        <p>Generating documentation tailored for you...</p>
+      </div>
+
+      <div class="doc-container hidden" id="doc-container">
+        <header class="doc-header">
+          <h1 class="doc-title" id="doc-title">Documentation</h1>
+          <div class="doc-meta">
+            <span class="doc-tag" id="doc-audience-tag">Traditional</span>
+            <span class="doc-tag" id="doc-style-tag">Narrative</span>
+            <span id="doc-token-count"></span>
+          </div>
+        </header>
+
+        <article class="doc-content" id="doc-content">
+          <!-- Rendered markdown goes here -->
+        </article>
+
+        <div class="suggestions-panel" id="suggestions-panel">
+          <h3 class="suggestions-title">Explore More</h3>
+          <div class="suggestion-chips" id="suggestion-chips">
+            <!-- Suggestion chips populated here -->
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Code Viewer Modal -->
+  <div class="modal-overlay" id="code-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" id="modal-file-path">file.py:1-10</span>
+        <button class="modal-close" onclick="closeCodeModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="code-view" id="modal-code-content">
+          Loading...
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const API_BASE = window.location.origin;
+
+    // State
+    let currentWorkspaceId = null;
+    let currentRepoFullName = null;
+    let currentAudienceType = 'traditional';
+    let currentStyle = 'narrative';
+    let currentReferences = {};
+    let workspaces = [];
+    let repos = [];
+
+    // ==========================================================================
+    // Toast
+    // ==========================================================================
+    function showToast(message, type = 'info') {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.className = 'toast show ' + type;
+      setTimeout(() => toast.className = 'toast', 4000);
+    }
+
+    // ==========================================================================
+    // Workspace & Repo Loading
+    // ==========================================================================
+    async function loadWorkspaces() {
+      try {
+        const response = await fetch(`${API_BASE}/api/workspaces`);
+        if (!response.ok) throw new Error('Failed to load workspaces');
+
+        const data = await response.json();
+        workspaces = data.workspaces || [];
+
+        const select = document.getElementById('workspace-select');
+        if (workspaces.length === 0) {
+          select.innerHTML = '<option value="">No workspaces - create one first</option>';
+        } else {
+          select.innerHTML = `
+            <option value="">Select a workspace...</option>
+            ${workspaces.map(w => `<option value="${w.id}">${w.name}</option>`).join('')}
+          `;
+        }
+
+        // Check URL hash for pre-selected workspace
+        if (window.location.hash) {
+          const parts = window.location.hash.slice(1).split('/');
+          if (parts[0]) {
+            select.value = parts[0];
+            await onWorkspaceSelect();
+            if (parts[1]) {
+              document.getElementById('repo-select').value = decodeURIComponent(parts[1]);
+              onRepoSelect();
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error loading workspaces:', error);
+        showToast('Error loading workspaces: ' + error.message, 'error');
+      }
+    }
+
+    async function onWorkspaceSelect() {
+      const select = document.getElementById('workspace-select');
+      currentWorkspaceId = select.value;
+
+      const repoSelect = document.getElementById('repo-select');
+
+      if (!currentWorkspaceId) {
+        repoSelect.innerHTML = '<option value="">Select workspace first...</option>';
+        repoSelect.disabled = true;
+        updateGenerateButton();
+        return;
+      }
+
+      repoSelect.innerHTML = '<option value="">Loading repos...</option>';
+
+      try {
+        const response = await fetch(`${API_BASE}/api/github/repos/${currentWorkspaceId}`);
+
+        if (response.status === 404) {
+          repoSelect.innerHTML = '<option value="">Connect GitHub first (go to dashboard)</option>';
+          repoSelect.disabled = true;
+          return;
+        }
+
+        if (!response.ok) throw new Error('Failed to fetch repos');
+
+        const data = await response.json();
+        repos = data.repos || [];
+
+        if (repos.length === 0) {
+          repoSelect.innerHTML = '<option value="">No repos found</option>';
+          repoSelect.disabled = true;
+        } else {
+          repoSelect.innerHTML = `
+            <option value="">Select a repository...</option>
+            ${repos.map(r => `<option value="${r.full_name}">${r.full_name}</option>`).join('')}
+          `;
+          repoSelect.disabled = false;
+        }
+      } catch (error) {
+        console.error('Error loading repos:', error);
+        repoSelect.innerHTML = '<option value="">Error loading repos</option>';
+        repoSelect.disabled = true;
+      }
+
+      updateGenerateButton();
+    }
+
+    function onRepoSelect() {
+      const repoSelect = document.getElementById('repo-select');
+      currentRepoFullName = repoSelect.value;
+
+      // Update URL hash
+      if (currentWorkspaceId && currentRepoFullName) {
+        window.location.hash = `${currentWorkspaceId}/${encodeURIComponent(currentRepoFullName)}`;
+      }
+
+      updateGenerateButton();
+    }
+
+    function updateGenerateButton() {
+      const btn = document.getElementById('generate-btn');
+      btn.disabled = !currentWorkspaceId || !currentRepoFullName;
+    }
+
+    // ==========================================================================
+    // Audience & Style Selection
+    // ==========================================================================
+    function setupAudienceSelection() {
+      const cards = document.querySelectorAll('.audience-card');
+      const customPanel = document.getElementById('custom-context-panel');
+
+      cards.forEach(card => {
+        card.addEventListener('click', () => {
+          cards.forEach(c => c.classList.remove('active'));
+          card.classList.add('active');
+          currentAudienceType = card.dataset.type;
+
+          if (currentAudienceType === 'custom') {
+            customPanel.classList.add('show');
+          } else {
+            customPanel.classList.remove('show');
+          }
+        });
+      });
+
+      // Example prompts
+      document.querySelectorAll('.example-prompt').forEach(prompt => {
+        prompt.addEventListener('click', () => {
+          document.getElementById('custom-context').value = prompt.dataset.text;
+        });
+      });
+    }
+
+    function setupStyleSelection() {
+      const pills = document.querySelectorAll('.style-pill');
+
+      pills.forEach(pill => {
+        pill.addEventListener('click', () => {
+          pills.forEach(p => p.classList.remove('active'));
+          pill.classList.add('active');
+          currentStyle = pill.dataset.style;
+        });
+      });
+    }
+
+    // ==========================================================================
+    // Documentation Generation
+    // ==========================================================================
+    async function generateDocumentation() {
+      if (!currentWorkspaceId || !currentRepoFullName) {
+        showToast('Please select a workspace and repository', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('generate-btn');
+      const btnText = document.getElementById('generate-btn-text');
+
+      btn.disabled = true;
+      btnText.textContent = 'Generating...';
+
+      document.getElementById('empty-state').classList.add('hidden');
+      document.getElementById('doc-container').classList.add('hidden');
+      document.getElementById('loading-state').classList.remove('hidden');
+
+      const customContext = document.getElementById('custom-context').value;
+
+      try {
+        const response = await fetch(`${API_BASE}/api/ai/generate-adaptive-doc`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspace_id: currentWorkspaceId,
+            repo_full_name: currentRepoFullName,
+            audience_type: currentAudienceType,
+            style: currentStyle,
+            custom_context: currentAudienceType === 'custom' ? customContext : null,
+            purpose: currentAudienceType === 'custom' ? customContext : null,
+          })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.detail || 'Failed to generate documentation');
+        }
+
+        displayDocumentation(data);
+        showToast('Documentation generated successfully!', 'success');
+
+      } catch (error) {
+        console.error('Error generating docs:', error);
+        showToast('Error: ' + error.message, 'error');
+        document.getElementById('loading-state').classList.add('hidden');
+        document.getElementById('empty-state').classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+        btnText.textContent = 'Generate Documentation';
+        updateGenerateButton();
+      }
+    }
+
+    function displayDocumentation(data) {
+      document.getElementById('loading-state').classList.add('hidden');
+      document.getElementById('doc-container').classList.remove('hidden');
+
+      // Update header
+      document.getElementById('doc-title').textContent = data.title;
+      document.getElementById('doc-audience-tag').textContent = getAudienceLabel(data.audience_type);
+      document.getElementById('doc-style-tag').textContent = data.style.charAt(0).toUpperCase() + data.style.slice(1);
+      document.getElementById('doc-token-count').textContent = `~${data.token_estimate} tokens`;
+
+      // Store references for code viewing
+      currentReferences = data.references;
+
+      // Parse and render markdown
+      let content = data.content;
+
+      // Convert [n] references to clickable links
+      content = content.replace(/\[(\d+)\]/g, (match, num) => {
+        const ref = currentReferences[`[${num}]`];
+        if (ref) {
+          return `<a href="#" data-ref="${num}" onclick="showCodeReference(${num}); return false;">[${num}]</a>`;
+        }
+        return match;
+      });
+
+      // Render markdown
+      document.getElementById('doc-content').innerHTML = marked.parse(content);
+
+      // Populate suggestions
+      const suggestionsPanel = document.getElementById('suggestions-panel');
+      const suggestionsContainer = document.getElementById('suggestion-chips');
+
+      if (data.suggested_next && data.suggested_next.length > 0) {
+        suggestionsContainer.innerHTML = data.suggested_next.map(suggestion =>
+          `<span class="suggestion-chip" onclick="exploreSuggestion('${suggestion}')">${suggestion}</span>`
+        ).join('');
+        suggestionsPanel.classList.remove('hidden');
+      } else {
+        suggestionsPanel.classList.add('hidden');
+      }
+    }
+
+    function getAudienceLabel(type) {
+      const labels = {
+        'traditional': '📖 Traditional Wiki',
+        'new_engineer': '🎓 New Engineer View',
+        'oncall': '🚨 On-Call Mode',
+        'custom': '✨ Custom Purpose'
+      };
+      return labels[type] || type;
+    }
+
+    function exploreSuggestion(suggestion) {
+      // Set up for a deep dive into a component
+      const customContext = document.getElementById('custom-context');
+      customContext.value = `I want to learn more about: ${suggestion}`;
+
+      // Switch to custom mode
+      const cards = document.querySelectorAll('.audience-card');
+      cards.forEach(c => c.classList.remove('active'));
+      document.querySelector('.audience-card[data-type="custom"]').classList.add('active');
+      currentAudienceType = 'custom';
+      document.getElementById('custom-context-panel').classList.add('show');
+
+      // Generate new docs
+      generateDocumentation();
+    }
+
+    // ==========================================================================
+    // Code Reference Modal
+    // ==========================================================================
+    async function showCodeReference(refNum) {
+      const ref = currentReferences[`[${refNum}]`];
+      if (!ref) return;
+
+      const modal = document.getElementById('code-modal');
+      const filePath = document.getElementById('modal-file-path');
+      const codeContent = document.getElementById('modal-code-content');
+
+      filePath.textContent = `${ref.file_path}:${ref.start_line}-${ref.end_line}`;
+      codeContent.textContent = 'Loading...';
+      modal.classList.add('show');
+
+      try {
+        const response = await fetch(
+          `${API_BASE}/api/index/chunk-content/${currentWorkspaceId}?` +
+          `repo_full_name=${encodeURIComponent(currentRepoFullName)}&` +
+          `file_path=${encodeURIComponent(ref.file_path)}&` +
+          `start_line=${ref.start_line}&` +
+          `end_line=${ref.end_line}`
+        );
+
+        if (!response.ok) throw new Error('Failed to fetch code');
+
+        const data = await response.json();
+
+        // Format with line numbers
+        const lines = data.content.split('\n');
+        const formatted = lines.map((line, i) => {
+          const lineNum = ref.start_line + i;
+          return `<span class="code-line-number">${lineNum}</span>${escapeHtml(line)}`;
+        }).join('\n');
+
+        codeContent.innerHTML = formatted;
+      } catch (error) {
+        codeContent.textContent = `Error loading code: ${error.message}`;
+      }
+    }
+
+    function closeCodeModal() {
+      document.getElementById('code-modal').classList.remove('show');
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Close modal on overlay click
+    document.getElementById('code-modal').addEventListener('click', (e) => {
+      if (e.target.classList.contains('modal-overlay')) {
+        closeCodeModal();
+      }
+    });
+
+    // Close modal on Escape key
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeCodeModal();
+      }
+    });
+
+    // ==========================================================================
+    // Event Listeners & Init
+    // ==========================================================================
+    document.getElementById('workspace-select').addEventListener('change', onWorkspaceSelect);
+    document.getElementById('repo-select').addEventListener('change', onRepoSelect);
+    document.getElementById('generate-btn').addEventListener('click', generateDocumentation);
+
+    setupAudienceSelection();
+    setupStyleSelection();
+    loadWorkspaces();
+  </script>
+</body>
+</html>
